@@ -2,8 +2,19 @@
 
 This is the integration heart of the engine and the home of the signature
 feature: *never silently pick an octave.* It scores every candidate as a
-weighted sum of independently-testable evidence terms, then applies two
-ambiguity triggers. When either fires, the result is flagged for a human
+weighted sum of independently-testable evidence terms, then applies three
+ambiguity triggers:
+
+  1. raw-vs-priored divergence (the prior fights the raw signal),
+  2. a strong octave/fractional runner-up (score-clustering), and
+  3. the primary lands outside the genre's canonical band while real rhythmic
+     evidence sits inside it.
+
+Triggers 1 & 2 both assume *competition* — they catch a contested octave. They
+are blind to a *single* dominant peak parked in a genre-implausible place with
+no competitor, which the engine would otherwise report as a confident wrong
+number (the precise v1 failure on the variant Ledger/Mathematics runs). Trigger
+3 closes that hole. When any trigger fires, the result is flagged for a human
 tiebreak and the full candidate set is surfaced with explanations — rather than
 emitting a confident wrong number, which is the exact failure mode that
 triggered this rebuild.
@@ -48,8 +59,21 @@ _FELT_RELATIONS = frozenset(
 # Simple musical ratios used to snap octave/fractional partners onto an exact
 # multiple of the precisely-refined anchor pulse (inherits its precision).
 _SIMPLE_RATIOS = (
-    1 / 3, 1 / 2, 5 / 8, 2 / 3, 3 / 4, 4 / 5, 5 / 6, 1.0,
-    6 / 5, 5 / 4, 4 / 3, 3 / 2, 8 / 5, 2.0, 3.0,
+    1 / 3,
+    1 / 2,
+    5 / 8,
+    2 / 3,
+    3 / 4,
+    4 / 5,
+    5 / 6,
+    1.0,
+    6 / 5,
+    5 / 4,
+    4 / 3,
+    3 / 2,
+    8 / 5,
+    2.0,
+    3.0,
 )
 
 
@@ -116,7 +140,9 @@ def resolve_tempo(features: Features, cfg: TempoConfig) -> TempoResult:
     # backbeat), then snap octave/fractional partners to exact ratios of it so
     # primary == 2x felt and every number inherits the anchor's precision.
     combined = build_combined_envelope(features.bands, cfg)
-    base_bpm = refine_bpm(combined, features.sr, features.hop_length, raw_best) if raw_best > 0 else 0.0
+    base_bpm = (
+        refine_bpm(combined, features.sr, features.hop_length, raw_best) if raw_best > 0 else 0.0
+    )
 
     def finalize(bpm: float) -> float:
         snapped = _snap_to_ratio(bpm, base_bpm)
@@ -130,9 +156,7 @@ def resolve_tempo(features: Features, cfg: TempoConfig) -> TempoResult:
     # --- Relationships of every candidate to the chosen primary. ---
     for c in candidates:
         c.relationship = (
-            Relationship.SELF
-            if c is primary
-            else classify_relationship(c.bpm, refined_primary)
+            Relationship.SELF if c is primary else classify_relationship(c.bpm, refined_primary)
         )
 
     # --- Felt (tapped) tempo. ---
@@ -220,5 +244,30 @@ def _detect_ambiguity(
                 f"{runner.bpm:.0f} ({runner.relationship.value}) scores within "
                 f"{pct:.0f}% of {top.bpm:.0f}"
             )
+
+    # Trigger 3: the primary is genre-implausible while real evidence sits in the
+    # canonical band. This is the "one strong peak in the wrong place, weak
+    # competition" case that Triggers 1 & 2 miss: the winner can be uncontested
+    # on score yet still sit below/above where the genre is ever notated. We only
+    # fire when a *salient* in-band candidate exists, so a clean non-drill signal
+    # (whose in-band candidates are zero-salience multiplier ghosts) is left
+    # confident rather than reflexively flagged.
+    if candidates:
+        primary = candidates[0]
+        in_band = amb.genre_band_min <= primary.bpm <= amb.genre_band_max
+        if not in_band:
+            in_band_evidence = [
+                c
+                for c in candidates[1:]
+                if amb.genre_band_min <= c.bpm <= amb.genre_band_max
+                and c.salience >= amb.band_evidence_floor
+            ]
+            if in_band_evidence:
+                witness = max(in_band_evidence, key=lambda c: c.salience)
+                reasons.append(
+                    f"primary {primary.bpm:.0f} is outside the drill band "
+                    f"[{amb.genre_band_min:.0f}-{amb.genre_band_max:.0f}], yet "
+                    f"{witness.bpm:.0f} (salience {witness.salience:.2f}) sits inside it"
+                )
 
     return (bool(reasons), "; ".join(reasons) if reasons else None)
