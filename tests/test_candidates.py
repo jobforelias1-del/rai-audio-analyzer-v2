@@ -22,6 +22,42 @@ def _within(cands, target, rel=0.03) -> bool:
     return any(abs(c - target) / target <= rel for c in cands)
 
 
+def _features_with_peak(peak_bpm: float, cfg) -> "object":
+    """Minimal Features whose product tempo curve has a single sharp peak.
+
+    generate_candidates only touches ``features.tempo_curve`` (peaks + value_at),
+    so the band envelopes can be empty stubs. The grid mirrors the real one
+    (``cfg.bpm_grid_*``) so range-filtering behaves exactly as in production.
+    """
+    from rai_analyzer.contracts import BandEnvelopes, Features, TempoCurve
+
+    grid = np.arange(cfg.bpm_grid_min, cfg.bpm_grid_max + cfg.bpm_grid_step, cfg.bpm_grid_step)
+    sal = np.exp(-0.5 * ((grid - peak_bpm) / 2.0) ** 2)
+    sal = sal / float(sal.max())
+    curve = TempoCurve(bpms=grid, salience=sal, acf=sal.copy(), dft=sal.copy())
+    t = np.linspace(0.0, 1.0, 16)
+    z = np.zeros_like(t)
+    bands = BandEnvelopes(sr=22050, hop_length=512, times=t, low=z, mid=z, high=z, full=z)
+    return Features(
+        sr=22050, hop_length=512, duration=10.0, bands=bands, tempo_curve=curve, high_curve=curve
+    )
+
+
+def test_five_four_family_surfaces_from_192_base(cfg):
+    """A 192 BPM lock must surface its 4/5 (≈154) AND 5/4 (240) aliases.
+
+    This is the exact Mathematics-of-the-Menace miss: the true 153.85 BPM is 4/5
+    of a 192 BPM lock — a 5:4-family ratio that NO octave/dotted multiplier can
+    reach — so without the extended set the truth was never even a candidate.
+    240 (5/4) is the symmetric partner and must survive the (now 240 BPM) range
+    filter rather than being silently truncated.
+    """
+    cands = generate_candidates(_features_with_peak(192.0, cfg), cfg)
+    assert cands, "expected a non-empty candidate set"
+    assert _within(cands, 154.0, 0.02), f"4/5 alias (≈154) missing from {cands}"
+    assert _within(cands, 240.0, 0.02), f"5/4 alias (240) missing from {cands}"
+
+
 def test_both_octaves_surface(features_drill_150, cfg):
     """A 150 BPM drill yields a candidate near 150 AND one near its half (75)."""
     cands = generate_candidates(features_drill_150, cfg)

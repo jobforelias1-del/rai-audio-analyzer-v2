@@ -33,18 +33,21 @@ class PriorParams:
     """Soft log-normal tempo prior, fit from the ground-truth set.
 
     The prior favours the region where drill/trap is *notated* (full-time,
-    ~130-175) over the half-time feel region (~65-90). It is deliberately SOFT
-    (wide sigma, non-zero floor) so it nudges rather than dictates — its main
-    job is to power the raw-vs-priored divergence ambiguity trigger, not to
-    overrule strong rhythmic evidence.
+    ~130-175) over the half-time feel region (~65-90). It stays SOFT (non-zero
+    floor) so it nudges rather than dictates — but the shoulders were tightened
+    (sigma 0.30 -> 0.24) because the old broad tails let a genre-implausible
+    peak (e.g. ~132) keep almost as much prior weight as the notated band,
+    which blunted the raw-vs-priored divergence trigger. Its main job remains
+    powering that trigger and the genre-band ambiguity check, not overruling
+    strong rhythmic evidence.
 
     Re-fit from the WAVs via ``rai_analyzer.evidence.prior.fit_prior`` once the
     ground-truth fixtures are dropped in.
     """
 
     center_bpm: float = 145.0  # geometric centre (BPM) of the prior bump
-    sigma: float = 0.30  # width in natural-log-BPM units (soft)
-    floor: float = 0.12  # minimum prior weight (keeps the prior from zeroing a candidate)
+    sigma: float = 0.24  # width in natural-log-BPM units (soft, but drill-tightened)
+    floor: float = 0.10  # minimum prior weight (keeps the prior from zeroing a candidate)
 
 
 @dataclass
@@ -96,10 +99,33 @@ class CandidateParams:
     """Candidate generation (spec: do NOT restrict to {1/2, 1, 2})."""
 
     # Octave AND fractional multipliers. 2/3 & 3/2 catch dotted / triplet locks;
-    # the engine also injects independent tempogram peaks (e.g. the ~5:8 alias).
-    multipliers: tuple[float, ...] = (1 / 3, 1 / 2, 2 / 3, 1.0, 3 / 2, 2.0, 3.0)
+    # the 5:4 family (4/5, 5/4) catches the quintuplet/5-against-4 alias that
+    # sank Mathematics of the Menace — its true 153.85 BPM is 4/5 of a 192 BPM
+    # lock, a ratio NO octave/dotted multiplier could ever reach, so the truth
+    # was never even surfaced as a candidate. 5/8 & 8/5 add the tresillo /
+    # dotted-eighth (~5:8) hemiola aliases (96 -> 153.6). The engine also still
+    # injects independent tempogram peaks directly as a backstop.
+    multipliers: tuple[float, ...] = (
+        1 / 3,
+        1 / 2,
+        5 / 8,
+        2 / 3,
+        3 / 4,
+        4 / 5,
+        1.0,
+        5 / 4,
+        4 / 3,
+        3 / 2,
+        8 / 5,
+        2.0,
+        3.0,
+    )
     bpm_min: float = 60.0  # plausible reported-tempo floor
-    bpm_max: float = 200.0  # plausible reported-tempo ceiling
+    # Ceiling lifted to the tempogram grid max so a 5/4 alias of a fast lock
+    # (e.g. 5/4 * 192 = 240) survives the range filter to be scored & rejected
+    # rather than silently dropped. Genre-implausible highs are caught downstream
+    # by scoring and the genre-band ambiguity trigger, not by truncating recall.
+    bpm_max: float = 240.0  # plausible reported-tempo ceiling
     dedup_tol: float = 0.03  # candidates within 3% are the same reported tempo; merge
     n_independent_peaks: int = 4  # add up to N strong product-tempogram peaks directly
     independent_peak_floor: float = 0.20  # min salience for an injected independent peak
@@ -115,6 +141,20 @@ class AmbiguityParams:
     # Trigger 2: the runner-up is octave/fractional-related to the winner AND
     # scores within this fraction of the winner.
     score_close_frac: float = 0.82
+    # Trigger 3 (the confidently-wrong catch): the primary lands OUTSIDE the
+    # genre's canonical notated band while real rhythmic evidence sits inside it.
+    # This is the failure Triggers 1 & 2 both miss — a single dominant peak in a
+    # genre-implausible place with weak competition, which the engine would
+    # otherwise report as a confident (wrong) number. Drill is canonically
+    # notated at 140-170 BPM; a primary of ~132 with a salient in-band partner
+    # is exactly that trap.
+    genre_band_min: float = 140.0  # drill canonical notated-tempo low edge (BPM)
+    genre_band_max: float = 170.0  # drill canonical notated-tempo high edge (BPM)
+    # A candidate inside the genre band only counts as "real evidence the primary
+    # missed" if its product-tempogram salience clears this floor. Keeps a clean
+    # non-drill signal (e.g. a 120 BPM metronome, whose only in-band candidates
+    # are zero-salience multiplier ghosts) from being flagged.
+    band_evidence_floor: float = 0.10
     # The "felt" (tappable) tempo band, used to derive felt_bpm.
     felt_min: float = 60.0
     felt_max: float = 110.0

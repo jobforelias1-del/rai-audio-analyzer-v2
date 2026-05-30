@@ -1,11 +1,14 @@
 """Tempo-candidate generation.
 
-The spec is emphatic: **do not restrict to {1/2, 1, 2}.** One known failure
-(96 -> 154) is not an octave at all — it is roughly a 5:8 fractional alias from
-locking onto a dotted-eighth / tresillo pulse. So we:
+The spec is emphatic: **do not restrict to {1/2, 1, 2}.** Two known failures
+prove why. (96 -> 154) is roughly a 5:8 fractional alias from locking onto a
+dotted-eighth / tresillo pulse. And Mathematics of the Menace (true 153.85) was
+read as a 192 BPM lock — 153.85 is 4/5 of 192, a **5:4 family** alias that no
+octave/dotted multiplier can reach, so the truth was never even surfaced. So we:
 
 1. Multiply the strongest product-tempogram peaks by the full multiplier set
-   ``[1/3, 1/2, 2/3, 1, 3/2, 2, 3]`` (octave + fractional family), and
+   ``[1/3, 1/2, 5/8, 2/3, 3/4, 4/5, 1, 5/4, 4/3, 3/2, 8/5, 2, 3]`` (octave +
+   dotted/triplet + the 5:4 and 5:8 hemiola families), and
 2. Inject the strong *independent* product-tempogram peaks directly into the
    candidate set — even if no multiplier produced them. This is what catches a
    fractional alias that is not a clean ratio of the dominant peak.
@@ -16,8 +19,6 @@ guarantee the truth is *present*.
 """
 
 from __future__ import annotations
-
-import numpy as np
 
 from .config import TempoConfig
 from .contracts import Features
