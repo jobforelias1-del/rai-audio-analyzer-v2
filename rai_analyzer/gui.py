@@ -26,12 +26,12 @@ def _run_analysis(path: str):
     This is designed to be called from a worker thread.  It returns a 2-tuple
     so the GUI can plot the tempogram without a second load.
     """
-    from .config import DEFAULT_CONFIG
-    from .contracts import AnalysisResult
-    from .io_audio import load_audio
-    from .loudness import measure_loudness
-    from .resolver import resolve_tempo
-    from .tempogram import build_features
+    from rai_analyzer.config import DEFAULT_CONFIG
+    from rai_analyzer.contracts import AnalysisResult
+    from rai_analyzer.io_audio import load_audio
+    from rai_analyzer.loudness import measure_loudness
+    from rai_analyzer.resolver import resolve_tempo
+    from rai_analyzer.tempogram import build_features
 
     signal = load_audio(path)
     feats = build_features(signal, DEFAULT_CONFIG)
@@ -497,8 +497,8 @@ def main():
         from tkinterdnd2 import TkinterDnD
         root = TkinterDnD.Tk()
         has_dnd = True
-    except ImportError:
-        pass
+    except Exception:
+        pass  # drag-drop unavailable; file picker still works
 
     if root is None:
         import tkinter as tk
