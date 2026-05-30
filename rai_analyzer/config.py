@@ -112,9 +112,14 @@ class AmbiguityParams:
     # Trigger 1 (most reliable): raw argmax(tempogram) vs argmax(tempogram*prior)
     # differ by more than this fraction => the prior is fighting the raw signal.
     divergence_tol: float = 0.03
-    # Trigger 2: the runner-up is octave/fractional-related to the winner AND
-    # scores within this fraction of the winner.
-    score_close_frac: float = 0.82
+    # Trigger 2 (score clustering): a distinct runner-up tempo scores within
+    # this fraction of the winner, so the engine cannot honestly commit to one.
+    # Tightened 0.82 -> 0.80 to flag the "Fixette shape" — a near-unison in-band
+    # competitor (truth ~141 vs primary ~146, ~0.85 of the primary's score) that
+    # the octave/fractional-only gate used to wave through as confident-but-wrong
+    # (see resolver._AMBIGUOUS_RELATIONS). Legitimate confident cases, whose
+    # runner-up sits below ~0.75, stay unflagged.
+    score_close_frac: float = 0.80
     # The "felt" (tappable) tempo band, used to derive felt_bpm.
     felt_min: float = 60.0
     felt_max: float = 110.0
