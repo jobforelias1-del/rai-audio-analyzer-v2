@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/*.app/
+dist/
+.venv/
+venv/
+
+# PyInstaller
+*.spec.bak
+
+# Test / tooling
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+
+# Ground-truth WAV fixtures are large and not committed; drop them in here.
+validation/fixtures/*.wav
+validation/fixtures/*.aiff
+validation/fixtures/*.flac
+validation/fixtures/*.mp3

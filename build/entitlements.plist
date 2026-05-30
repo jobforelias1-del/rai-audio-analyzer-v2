@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  build/entitlements.plist
+  Hardened-runtime entitlements for RAI Audio Analyzer v2.
+
+  Only needed for Developer ID (notarized) signing.
+  Ad-hoc signing (the default in build/build_macos.sh) does not require
+  this file, but passing it to codesign is harmless.
+
+  Developer ID usage:
+    codesign -f -deep -o runtime
+             -E build/entitlements.plist
+             -s "Developer ID Application: Your Name (TEAMID)"
+             "dist/RAI Audio Analyzer.app"
+
+  Why these two entitlements:
+  numba JIT-compiles Python to native code via LLVM (llvmlite).
+  The hardened runtime blocks both capabilities by default.
+
+  allow-jit: lets the process use MAP_JIT mmap, required by numba on
+    Apple Silicon and macOS 10.14+ (W^X memory policy).
+
+  allow-unsigned-executable-memory: lets the process write to executable
+    memory pages not marked MAP_JIT (llvmlite fallback on some versions).
+
+  No other entitlements (network, microphone, camera, etc.) are granted.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+</dict>
+</plist>

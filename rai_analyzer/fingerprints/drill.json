@@ -1,0 +1,68 @@
+{
+  "low": [
+    0.6178020632152155,
+    0.0,
+    0.0,
+    0.4324614442506508,
+    0.0,
+    0.0,
+    0.4942416505721724,
+    0.0,
+    0.0,
+    0.0,
+    0.4324614442506508,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "mid": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.7071067811865475,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.7071067811865475,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "high": [
+    0.3466876226407682,
+    0.2080125735844609,
+    0.2080125735844609,
+    0.2080125735844609,
+    0.3466876226407682,
+    0.2080125735844609,
+    0.2080125735844609,
+    0.2080125735844609,
+    0.3466876226407682,
+    0.2080125735844609,
+    0.2080125735844609,
+    0.2080125735844609,
+    0.3466876226407682,
+    0.2080125735844609,
+    0.2080125735844609,
+    0.2080125735844609
+  ],
+  "_meta": {
+    "source": "bootstrap-handcrafted",
+    "genre": "drill",
+    "bins_per_bar": 16,
+    "beats_per_bar": 4,
+    "bands": [
+      "low",
+      "mid",
+      "high"
+    ],
+    "note": "BOOTSTRAP default hand-derived from drill metrical structure (kick syncopated 0/3/6/10, snare backbeat 4&12, even hats). NOT learned from audio. Re-derive with rai_analyzer.evidence.fingerprint.learn_fingerprint() once ground-truth WAVs are dropped into validation/fixtures/, then save_fingerprint(d, this_path)."
+  }
+}

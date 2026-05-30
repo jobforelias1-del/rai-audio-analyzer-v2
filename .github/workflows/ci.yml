@@ -1,0 +1,32 @@
+name: CI
+
+# The build spec requires the validation gate to run on every push. This
+# workflow runs the unit suite and then the acceptance gate. With no
+# ground-truth WAVs committed (they are gitignored), the gate runs its
+# synthetic self-test and must exit 0; once the producer drops the real
+# fixtures into validation/fixtures/, the same step runs the REAL gate.
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-and-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy librosa soundfile pyloudnorm pytest
+
+      - name: Unit tests
+        run: python -m pytest -q
+
+      - name: Acceptance gate (synthetic self-test unless fixtures present)
+        run: python -m validation
