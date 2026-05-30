@@ -22,6 +22,17 @@
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 # ---------------------------------------------------------------------------
+# 0. Repo-root path resolution
+# ---------------------------------------------------------------------------
+# PyInstaller resolves relative paths in a spec file relative to the SPEC
+# file's own directory (build/), NOT the current working directory.  Every
+# repo-root-relative path below is therefore joined onto _ROOT, computed from
+# the SPEC global PyInstaller injects at spec-execution time.
+import os as _dispatch_os
+_HERE = _dispatch_os.path.dirname(_dispatch_os.path.abspath(SPEC))
+_ROOT = _dispatch_os.path.dirname(_HERE)
+
+# ---------------------------------------------------------------------------
 # 1. Data files
 # ---------------------------------------------------------------------------
 
@@ -39,19 +50,29 @@ numpy_meta      = copy_metadata('numpy')
 scipy_meta      = copy_metadata('scipy')
 sklearn_meta    = copy_metadata('scikit-learn')  # llvmlite/numba may need it
 
-# tkinterdnd2 ships a platform-specific 'tkdnd' shared-library directory.
-# We pull it in as a Tree so the whole subtree is included as-is.
+# tkinterdnd2 ships a 'tkdnd' directory holding the tkdnd shared libraries for
+# every platform (osx-x64, osx-arm64, linux-*, win-*).  Bundle ONLY the
+# host-matching macOS subdirectory: Tcl's `package require tkdnd` (no version
+# pinned) otherwise picks the highest version it finds — the wrong-arch osx-x64
+# build (2.9.4 > arm64's 2.9.3) — and crashes at launch on Apple Silicon.  The
+# Linux/Windows binaries are dead weight in a macOS .app regardless.
 import tkinterdnd2 as _tkdnd2_mod
 import os as _os
+import platform as _dispatch_platform
 _tkdnd2_dir = _os.path.dirname(_tkdnd2_mod.__file__)
+_mac_arch = _dispatch_platform.machine()
+_tkdnd_platform_dir = 'osx-arm64' if _mac_arch == 'arm64' else 'osx-x64'
 tkdnd_datas = [
-    (_os.path.join(_tkdnd2_dir, 'tkdnd'), 'tkinterdnd2/tkdnd'),
+    (
+        _os.path.join(_tkdnd2_dir, 'tkdnd', _tkdnd_platform_dir),
+        f'tkinterdnd2/tkdnd/{_tkdnd_platform_dir}',
+    ),
 ]
 
 # Our own fingerprint profiles (bundled genre JSON files).
 # The glob '*.json' ensures any file produced by fit_prior is included.
 fingerprints_datas = [
-    ('rai_analyzer/fingerprints/*.json', 'rai_analyzer/fingerprints'),
+    (_dispatch_os.path.join(_ROOT, 'rai_analyzer/fingerprints/*.json'), 'rai_analyzer/fingerprints'),
 ]
 
 # Combine all data sources.
@@ -121,8 +142,8 @@ all_hidden = (
 a = Analysis(
     # Entry point: the GUI main() — the CLI can still be invoked from the
     # terminal via the raw interpreter, but the .app launches the GUI.
-    ['rai_analyzer/gui.py'],
-    pathex=['.'],
+    [_dispatch_os.path.join(_ROOT, 'rai_analyzer/gui.py')],
+    pathex=[_ROOT],
     binaries=[],
     datas=all_datas,
     hiddenimports=all_hidden,
@@ -165,7 +186,7 @@ exe = EXE(
     argv_emulation=True,     # macOS: open(file) events forwarded to sys.argv
     target_arch=None,        # None = build for the host arch (arm64 on M-series)
     codesign_identity=None,  # overridden at signing time; see build_macos.sh
-    entitlements_file='build/entitlements.plist',
+    entitlements_file=_dispatch_os.path.join(_ROOT, 'build/entitlements.plist'),
 )
 
 # ---------------------------------------------------------------------------
@@ -194,7 +215,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='RAI Audio Analyzer.app',
-    icon=None,   # replace with 'build/RAIAudioAnalyzer.icns' once an icon exists
+    icon=_dispatch_os.path.join(_ROOT, 'build/RAIAudioAnalyzer.icns'),
     bundle_identifier='com.siliconclick.rai-audio-analyzer',
     info_plist={
         # Human-readable product name shown in Finder and the menu bar.
