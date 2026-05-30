@@ -21,8 +21,8 @@ import numpy as np
 import pytest
 
 from rai_analyzer.config import DEFAULT_CONFIG
-from rai_analyzer.contracts import Relationship, TempoResult
-from rai_analyzer.resolver import resolve_tempo
+from rai_analyzer.contracts import Candidate, Relationship, TempoResult, classify_relationship
+from rai_analyzer.resolver import _detect_ambiguity, resolve_tempo
 from rai_analyzer.synthetic import as_signal
 from rai_analyzer.tempogram import build_features
 
@@ -156,3 +156,57 @@ def test_silent_signal_resolves_without_crashing():
     assert r.felt_bpm is None
     # The dict round-trip still works on the degenerate result.
     assert r.to_dict()["ambiguous"] is True
+
+
+# ---------------------------------------------------------------------------
+# Score-clustering ambiguity trigger (the Fixette-shape fix).
+#
+# These exercise _detect_ambiguity directly with constructed candidate sets so
+# the score-clustering threshold can be tested in isolation from the evidence
+# terms. In every case raw_best == priored_best, so the raw-vs-priored
+# divergence trigger (Trigger 1) cannot fire and ONLY the score-clustering
+# trigger (Trigger 2) is under test.
+# ---------------------------------------------------------------------------
+
+
+def _ranked(primary_bpm, primary_score, runner_bpm, runner_score):
+    """Build a 2-candidate ranked set (primary first) with real relationships."""
+    primary = Candidate(bpm=primary_bpm, score=primary_score, relationship=Relationship.SELF)
+    runner = Candidate(
+        bpm=runner_bpm,
+        score=runner_score,
+        relationship=classify_relationship(runner_bpm, primary_bpm),
+    )
+    return [primary, runner]
+
+
+def test_fixette_shape_near_unison_cluster_is_flagged():
+    # Fixette shape: the primary (146) and a truth-like alternative (141) are
+    # BOTH inside the drill canonical band, only ~4% apart, so the competitor
+    # classifies as near-unison (SELF) — NOT an octave/fractional partner — and
+    # neither the out-of-band nor the octave trigger fires. The competitor
+    # scores ~86% of the primary, which the broadened score-clustering trigger
+    # must treat as too close to call.
+    candidates = _ranked(146.0, 2.360, 141.0, 2.360 * 0.86)
+    assert candidates[1].relationship is Relationship.SELF  # near-unison, not octave
+    ambiguous, reason = _detect_ambiguity(
+        candidates, DEFAULT_CONFIG, raw_best=146.0, priored_best=146.0
+    )
+    assert ambiguous is True
+    assert reason  # a non-empty, human-readable explanation
+    assert "141" in reason and "146" in reason  # names both competing tempos
+
+
+def test_confident_in_band_primary_is_not_flagged():
+    # Regression guard: a genuinely confident in-band primary whose closest
+    # competitor sits well back (~72% of the primary score) must NOT be flagged.
+    # Same near-unison relationship as the Fixette case, but the score gap is
+    # wide enough to commit — the broadened trigger must not turn every
+    # runner-up into an ambiguity.
+    candidates = _ranked(150.0, 2.400, 145.0, 2.400 * 0.72)
+    assert candidates[1].relationship is Relationship.SELF
+    ambiguous, reason = _detect_ambiguity(
+        candidates, DEFAULT_CONFIG, raw_best=150.0, priored_best=150.0
+    )
+    assert ambiguous is False
+    assert reason is None
