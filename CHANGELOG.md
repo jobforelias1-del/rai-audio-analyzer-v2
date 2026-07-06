@@ -6,6 +6,34 @@ for behavioural changes; unit tests guard the mechanisms.
 
 ## [Unreleased]
 
+### Phase 0 stabilization — 2026-07-06 (v3 baseline)
+
+Repository stabilized ahead of the v3 modernization (PySide6 frontend decided;
+engines to remain untouched). No engine behaviour changed in this phase beyond
+landing the already-authored fervent-planck branch (flag-only resolver
+groundwork, see below).
+
+- **Acceptance gate back to GREEN 3/3** — the red gate was **fixture drift,
+  not engine regression**: a variant Suno generation was copied over
+  `mathematics_of_the_menace.wav` on 2026-06-22, and a variant Ledger excerpt
+  from the May-30 experiment was never reverted. The DAW-warp-confirmed
+  original bounces were located, verified against the May-30 green log
+  (reproduced verbatim to 3 decimals), and restored; the missing Taco fixture
+  was installed (provisional Moises copy). Fixture md5s are now pinned in
+  `validation/ground_truth.py` and the harness warns loudly on mismatch.
+- **Dirty tree resolved** — the shipped-2.0.0 uncommitted "DISPATCH" patches
+  are preserved verbatim on branch `rescue/dirty-tree-20260706` and land on
+  main via the fervent-planck merge (verified subsumption, per-hunk). The
+  pre-build auto-stash was verified content-identical to the rescued
+  `drill.learned.json` and dropped.
+- **v1 source archived** — `reference/v1/` (see its `PROVENANCE.md`;
+  SHA-256-verified as the exact tree that built the shipped LEGACY app) plus a
+  full-tree tarball in `~/Projects/rai-archives/`.
+- **Environment pinned** — `requirements.lock.txt` (verified working set) +
+  `docs/ENVIRONMENT.md` (build policy: never freeze an .app from Homebrew
+  Python / Tcl-Tk 9 — the root cause of the 2026-07-03 DOA crash and the dead
+  drag-drop; post-build .app smoke test mandatory).
+
 ### Fixed — octave/alias recall + confidently-wrong detection
 
 Two distinct structural failures, both surfaced by the variant Ledger/Mathematics
