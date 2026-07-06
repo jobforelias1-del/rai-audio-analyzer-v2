@@ -320,7 +320,15 @@ def run_gate(tol: float = 0.02, recall_tol: float = 0.03) -> bool:
     # a deliberately re-supplied master just needs its md5 re-pinned in
     # ground_truth.py.
     for t in tracks:
-        actual = t.md5_mismatch()
+        try:
+            actual = t.md5_mismatch()
+        except OSError as exc:
+            # A present-but-unreadable fixture must not crash the integrity
+            # check into a traceback; warn and let analyze_file() report the
+            # real I/O problem in context.
+            print(f"  WARNING: could not verify {t.filename} integrity: {exc}")
+            print()
+            continue
         if actual is not None:
             print(f"  WARNING: {t.filename} md5 {actual} != pinned {t.known_md5}")
             print(f"           This is NOT the bounce '{t.name}' (true {t.true_bpm} BPM)")
