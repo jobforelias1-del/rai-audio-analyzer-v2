@@ -28,6 +28,38 @@ Google-confirmed value). They are the single source of truth in
 [`../ground_truth.py`](../ground_truth.py) — do not edit the numbers here; edit
 them there if they ever change.
 
+## The truth is tied to the exact bounce — md5 registry
+
+A truth value is confirmed against **one specific bounce**. A different bounce
+of the same song (another Suno generation, a new mix, an excerpt) can analyse
+differently — that is a *fixture* change, not an *engine* change. This bit the
+project in June 2026: a variant Suno generation was copied over
+`mathematics_of_the_menace.wav` (and a variant Ledger excerpt was left in place
+after a May-30 experiment), silently turning the gate red for five weeks while
+the engine was innocent.
+
+The verified originals, restored 2026-07-06:
+
+| fixture                         | md5 (pinned in `ground_truth.py`)  | provenance                                   |
+| ------------------------------- | ---------------------------------- | -------------------------------------------- |
+| `ledger_en_acier.wav`           | `af76cabc873e1e703b420c7506b95ebe` | 103.56 s original, Suno blob `f171b931…`     |
+| `mathematics_of_the_menace.wav` | `19b4c0eae627324a31a49dd4e3711059` | 64.92 s original, Suno blob `10f1c5f2…`      |
+| `taco_puttin_on_the_ritz.wav`   | `a3a2a8f08fa6c2d8aa128f9967f7747c` | **PROVISIONAL** — Moises download, filename carried `99bpm`; replace with the preferred master + re-pin at will |
+
+The harness now md5-checks each present fixture against the pin and prints a
+loud WARNING on mismatch (it does not fail the gate — a deliberately
+re-supplied master just needs its truth re-confirmed in the DAW and the md5
+re-pinned).
+
+The displaced **variant bounces** remain useful as *non-gate* hard cases — the
+variant Mathematics (md5 `40e1d5d0…`, 41.08 s, identical to
+`~/Downloads/MATHEMATICS OF THE MENACE.wav`) produces a documented
+confidently-wrong 140.82 BPM, and the variant Ledger (md5 `57a1803d…`, 29.8 s,
+identical to `…/10 tracks/Ledger En Acier-2.wav`) passes only via flag. Both
+are the right targets for future resolver work (see the `UNRELATED`
+trigger-extension note in the CHANGELOG), but they are **not** what the truth
+table's numbers were confirmed against.
+
 WAV is the primary intake format. The loader (`rai_analyzer.io_audio.load_audio`)
 will tolerate `.aiff` / `.flac` / `.mp3` if soundfile/audioread can open them,
 but the harness only auto-detects the `.wav` filenames in the table above.

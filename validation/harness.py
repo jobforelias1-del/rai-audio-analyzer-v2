@@ -313,5 +313,22 @@ def run_gate(tol: float = 0.02, recall_tol: float = 0.03) -> bool:
               f"{len(tracks)} present: {', '.join(missing)}")
         print()
 
+    # Fixture-integrity check. Each truth value is tied to the exact bounce it
+    # was DAW-warp confirmed against; a different bounce of the same song can
+    # analyse differently, silently turning the gate red (or green) for reasons
+    # that have nothing to do with the engine. Warn loudly, but do not fail:
+    # a deliberately re-supplied master just needs its md5 re-pinned in
+    # ground_truth.py.
+    for t in tracks:
+        actual = t.md5_mismatch()
+        if actual is not None:
+            print(f"  WARNING: {t.filename} md5 {actual} != pinned {t.known_md5}")
+            print(f"           This is NOT the bounce '{t.name}' (true {t.true_bpm} BPM)")
+            print("           was confirmed against — its result is not comparable to")
+            print("           the recorded baseline. Restore the original bounce, or")
+            print("           re-confirm the truth in the DAW and re-pin the md5 in")
+            print("           validation/ground_truth.py.")
+            print()
+
     pairs = [(track, analyze_file(track.path, with_loudness=False)) for track in tracks]
     return _run_over_tracks(pairs, tol, recall_tol, label="REAL ACCEPTANCE GATE")
