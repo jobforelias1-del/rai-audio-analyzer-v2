@@ -38,9 +38,16 @@ from .evidence import (
 )
 from .tempogram import build_combined_envelope, refine_bpm
 
-# Relationships that count as an octave/fractional partner for ambiguity.
+# Relationships that, on a near-equal-scoring runner-up, make the verdict
+# ambiguous. The octave/fractional family is the classic octave trap. SELF is
+# the "Fixette shape": a *distinct* in-band tempo only a few percent from the
+# primary (e.g. truth 141 vs primary 146, both inside the drill band) — it
+# survives candidate de-dup yet classifies as near-unison, so the
+# octave/fractional-only gate used to let a confident-but-wrong primary through
+# unflagged. Counting SELF closes that hole without disturbing the octave logic.
 _AMBIGUOUS_RELATIONS = frozenset(
     {
+        Relationship.SELF,
         Relationship.OCTAVE_UP,
         Relationship.OCTAVE_DOWN,
         Relationship.TRIPLE,
@@ -231,7 +238,10 @@ def _detect_ambiguity(
                 f"{priored_best:.0f} ({rel.value})"
             )
 
-    # Trigger 2: a strong octave/fractional runner-up.
+    # Trigger 2 (score clustering): a strong runner-up — an octave/fractional
+    # partner OR a near-unison in-band alternate (the Fixette shape) — scores
+    # within score_close_frac of the winner, so the engine declines to force a
+    # confident pick between two near-tied tempos.
     if len(candidates) >= 2:
         top, runner = candidates[0], candidates[1]
         if (

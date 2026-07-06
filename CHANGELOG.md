@@ -37,6 +37,69 @@ runs against the DAW-warp-confirmed ground truth:
   metronome, whose only in-band candidates are zero-salience multiplier ghosts)
   from being reflexively flagged.
 
+### Fixed — build-pipeline reproducibility (the 2026-05-30 local-only patches, committed)
+
+The macOS `.app` built and launched on the producer's Apple Silicon Mac
+(macOS 26.5, Python 3.14) only after a chain of **local-only** patches applied
+during a 2026-05-30 session. None of those patches were committed, so a fresh
+clone of `main` reproduced every failure they fixed. These entries commit them:
+
+- **PyInstaller spec path resolution** (`build/RAIAudioAnalyzer.spec`).
+  PyInstaller resolves relative paths in a spec file relative to the spec
+  file's own directory (`build/`), not the current working directory, so the
+  repo-root-relative paths (`rai_analyzer/gui.py`, `pathex=['.']`,
+  `entitlements.plist`, the fingerprints glob) all failed to resolve. A `_ROOT`
+  helper now derives the repo root from the injected `SPEC` global and every
+  repo-root-relative path is joined onto it.
+- **Cross-arch / cross-platform tkdnd bundling** (`build/RAIAudioAnalyzer.spec`).
+  `tkinterdnd2` ships `tkdnd` libraries for every platform. Bundling them all
+  let Tcl's un-pinned `package require tkdnd` pick the highest version it found
+  — the wrong-architecture `osx-x64` build (2.9.4 > arm64's 2.9.3) — which
+  crashed at launch on Apple Silicon. The spec now bundles only the
+  host-matching macOS subdirectory (`osx-arm64` / `osx-x64`).
+- **Drag-and-drop fallback on Python 3.13+** (`rai_analyzer/gui.py`).
+  tkdnd 2.9.x is built against **Tcl/Tk 8.x** and does not load against the
+  **Tcl/Tk 9.x** that ships with Python 3.13+. The loader raises
+  `RuntimeError: Unable to load tkdnd library`, not `ImportError`, so the
+  narrow `except ImportError` never caught it and the app crashed at startup.
+  The bootstrap now catches `Exception`, so drag-drop is cleanly disabled on
+  Tcl/Tk 9 while the app still launches and works via the file picker.
+- **Relative imports under PyInstaller script-mode** (`rai_analyzer/gui.py`).
+  PyInstaller runs `gui.py` as a top-level script with no parent package, so
+  the lazy relative imports in `_run_analysis()` raised
+  `ImportError: attempted relative import with no known parent package` the
+  first time a file was loaded. They are now absolute
+  (`from rai_analyzer.… import …`), which behaves identically under
+  `python -m rai_analyzer.gui` and additionally works in the frozen app.
+- **"Fixette-shape" ambiguity trigger widened** (`rai_analyzer/resolver.py`,
+  `rai_analyzer/config.py`). In the 2026-05-30 held-out commercial-drill test,
+  Ziak — *Fixette* produced a primary of 146.57 BPM against an ear-anchored
+  DAW-warp truth of 140.99 BPM. Both sit inside the drill canonical band
+  (140–170), so the out-of-band trigger never fired, and the score-clustering
+  trigger only fired for octave/fractional runner-ups. `SELF` (near-unison) is
+  now counted among the ambiguity-triggering relations.
+  **Accuracy note (measured 2026-07-06):** this does *not* yet flag the real
+  Fixette case — its actual runner-up (134.69 BPM, ~8% off the 146.57 primary)
+  classifies as `UNRELATED` under the 4% ratio tolerance, outside the widened
+  relation set. Extending the set to `UNRELATED` runners has been measured to
+  flag Fixette (and the variant-bounce gate misses) but changes flag rates on
+  otherwise-confident material; that extension is deferred to dedicated engine
+  work with a corpus-wide flag-rate analysis. The widened trigger and tightened
+  threshold below are kept as safe, monotone-toward-flagging groundwork.
+
+### Added
+
+- **Application icon** (`build/RAIAudioAnalyzer.icns`) and its wiring in the
+  spec's `BUNDLE` block (previously `icon=None`). The committed icon is a valid
+  multi-resolution `.icns` (32–1024 px, including the `ic12` 64 px type) with an
+  on-brand tempogram motif; replace it byte-for-byte with final art at any time.
+- **Unit tests for the Fixette shape** (`tests/test_resolver.py`): one asserting
+  a near-unison in-band competitor at ~86% of the primary's score is flagged
+  ambiguous, and a regression guard asserting a confident in-band primary whose
+  competitor sits at ~72% stays unflagged. (These cover the trigger semantics
+  with synthetic candidates; a test against the real Fixette shape is future
+  work alongside the `UNRELATED` extension above.)
+
 ### Changed
 
 - **Genre prior re-tuned for drill.** The soft log-normal prior kept its shape
@@ -45,6 +108,12 @@ runs against the DAW-warp-confirmed ground truth:
   broad tails handed a genre-implausible peak (~132 BPM) nearly as much prior
   weight as the notated band, which blunted the raw-vs-priored divergence
   trigger.
+- **Score-clustering ambiguity threshold** tightened `0.82 → 0.80`
+  (`AmbiguityParams.score_close_frac`) so a near-unison competitor at ~0.85 of
+  the primary's score is flagged with margin while legitimately confident cases
+  (competitor ≤ ~0.75; clean clicks ~0.59) stay unflagged. (The trigger flags
+  when `runner / primary ≥ frac`, so the threshold must sit *below* the target
+  ratio.)
 
 ### Notes
 
@@ -56,3 +125,6 @@ runs against the DAW-warp-confirmed ground truth:
   covers the new out-of-band trigger, the click-safe salience floor, and a
   regression guard on the existing competitor-score trigger. The synthetic
   acceptance gate remains 3/3 PASS.
+- No fingerprint, dependency, or public-API changes from the build-pipeline
+  work; `tkinterdnd2` is retained (it still works on Python 3.12 / Tcl 8.6,
+  and the fallback covers 3.13+).

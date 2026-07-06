@@ -138,9 +138,17 @@ class AmbiguityParams:
     # Trigger 1 (most reliable): raw argmax(tempogram) vs argmax(tempogram*prior)
     # differ by more than this fraction => the prior is fighting the raw signal.
     divergence_tol: float = 0.03
-    # Trigger 2: the runner-up is octave/fractional-related to the winner AND
-    # scores within this fraction of the winner.
-    score_close_frac: float = 0.82
+    # Trigger 2 (score clustering): a runner-up in _AMBIGUOUS_RELATIONS scores
+    # within this fraction of the winner, so the engine cannot honestly commit.
+    # Tightened 0.82 -> 0.80 with SELF added to the relation set, aimed at the
+    # "Fixette shape" (a strong in-band competitor near the primary). Known
+    # limitation, measured 2026-07-06: the real Fixette runner-up (134.69 vs
+    # primary 146.57) sits ~8% off unity and classifies UNRELATED under the 4%
+    # ratio tolerance, so this trigger still does not fire on that track.
+    # Extending the relation set to UNRELATED flags it (and the variant-bounce
+    # gate misses) but changes flag rates on confident material — deferred to
+    # dedicated engine work with corpus-wide flag-rate analysis.
+    score_close_frac: float = 0.80
     # Trigger 3 (the confidently-wrong catch): the primary lands OUTSIDE the
     # genre's canonical notated band while real rhythmic evidence sits inside it.
     # This is the failure Triggers 1 & 2 both miss — a single dominant peak in a
