@@ -81,9 +81,14 @@ from rai_ui.theme.icons import glyph_icon
 from rai_ui.widgets import mono_font, ui_font
 from rai_ui.widgets.chips import CHIP_HEIGHT, paint_chip, paint_human_pill
 
-# Column order per the design grid `88px 168px 1fr 64px 56px 88px` (CO:273).
+# Column order per the design grid `88px 168px 1fr 64px 56px 88px` with a
+# 12px column gap (CO:273). Qt sections are contiguous (no grid gap), so each
+# interior fixed column folds its trailing 12px gap into its section width
+# (88→100, 168→180, 64→76, 56→68); the stretch column absorbs its own gap and
+# the last column has no trailing gap (88 stays 88). ``content_rect`` below
+# carves the design's cell content back out of these widened sections.
 COL_BPM, COL_RELATION, COL_SALIENCE_BAR, COL_SALIENCE, COL_SCORE, COL_HEAR = range(6)
-COLUMN_WIDTHS: tuple[int, ...] = (88, 168, -1, 64, 56, 88)  # -1 = stretch (1fr)
+COLUMN_WIDTHS: tuple[int, ...] = (100, 180, -1, 76, 68, 88)  # -1 = stretch (1fr)
 # Header labels pre-uppercased here — Qt QSS has no text-transform (see the
 # theme template's header comment). Blank sections per the design.
 HEADERS: tuple[str, ...] = ("BPM", "RELATION", "SALIENCE", "", "SCORE", "")
@@ -91,7 +96,23 @@ HEADERS: tuple[str, ...] = ("BPM", "RELATION", "SALIENCE", "", "SCORE", "")
 ROW_HEIGHT = 40  # design: row 40
 ROW_GAP = 2  # design: 2px gap between rows (painted as a 1px inset each side)
 _CELL_PAD_X = 10  # design: cell padding 0 10px
+_COL_GAP = 12  # design: grid column-gap 12 — folded into section widths above
 _ROW_RADIUS = 7
+
+
+def content_rect(rect: QRect, column: int) -> QRect:
+    """The design's cell content rect inside a (gap-widened) section rect.
+
+    Every column gets the design's 10px cell padding on both sides; interior
+    columns (all but the last) additionally reserve the 12px grid gap folded
+    into their section's right edge, so content-to-content spacing between
+    adjacent columns is 10 + 12 + 10 = 32px and right content edges (salience
+    bar track, salience value, score) sit at the design's track positions.
+    The header stays aligned for free: QSS pads ``QHeaderView::section`` 10px
+    left, matching this rect's left edge for the left-aligned labels.
+    """
+    trailing = _CELL_PAD_X if column == len(COLUMN_WIDTHS) - 1 else _CELL_PAD_X + _COL_GAP
+    return rect.adjusted(_CELL_PAD_X, 0, -trailing, 0)
 
 HEAR_TEXT = "▶ hear"  # verbatim copy (model/accessibility); ▶ is drawn in paint
 _HEAR_BUTTON_HEIGHT = 24  # size.hit-min
@@ -202,8 +223,8 @@ class CandidateRowDelegate(QStyledItemDelegate):
         painter.setClipRect(option.rect)
         self._paint_row_background(painter, option, index, row)
 
-        inner = option.rect.adjusted(_CELL_PAD_X, 0, -_CELL_PAD_X, 0)
         column = index.column()
+        inner = content_rect(option.rect, column)
         if column == COL_BPM:
             # token: color.text.primary — BPM mono 15/600
             painter.setFont(self._bpm_font)

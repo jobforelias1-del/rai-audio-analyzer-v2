@@ -122,6 +122,23 @@ def diamond_pixmap(px: int, color: str):
     return glyph_icon("diamond", color).pixmap(QSize(px, px))
 
 
+def type_pin(font: QFont) -> str:
+    """Widget-level QSS type pin for a label whose font matters.
+
+    The app-wide stylesheet's ``QWidget { font-family; font-size }`` rule
+    outranks any ``QLabel.setFont`` (M0 landmine 6 — the nav/header pins are
+    the established convention), so every designed type size restates
+    family / pixel size / weight at widget-stylesheet level. The paired
+    ``setFont`` call STAYS: it carries letter-spacing and fallback behavior
+    QSS does not manage. Deriving the pin FROM the same ``QFont`` guarantees
+    the two can never disagree.
+    """
+    return (
+        f' font-family: "{font.family()}"; font-size: {font.pixelSize()}px;'
+        f" font-weight: {int(font.weight())};"
+    )
+
+
 class SweepTrack(QWidget):
     """The Working card's 2px progress track with a 30%-wide accent sweep.
 
@@ -215,7 +232,9 @@ class VerdictBlock(QFrame):
         self._icon_label.setFixedSize(13, 13)
         self._icon_label.hide()
         self._word_label = QLabel(self)
-        self._word_label.setFont(mono_font(13, QFont.Weight.DemiBold))  # word 13/600
+        word_font = mono_font(13, QFont.Weight.DemiBold)  # word 13/600
+        self._word_label.setFont(word_font)
+        self._word_pin = type_pin(word_font)  # re-applied on every set_verdict restyle
         word_row.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
         word_row.addWidget(self._word_label, 0, Qt.AlignmentFlag.AlignVCenter)
         word_row.addStretch(1)
@@ -226,16 +245,21 @@ class VerdictBlock(QFrame):
         sub_font = ui_font(11, QFont.Weight.DemiBold)
         sub_font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 105.0)  # 0.05em
         self._tiebreak_sub.setFont(sub_font)
-        # token: color.semantic.ambiguous.text
-        self._tiebreak_sub.setStyleSheet(f"color: {COLOR_SEMANTIC_AMBIGUOUS_TEXT};")
+        # token: color.semantic.ambiguous.text (letter-spacing rides the QFont)
+        self._tiebreak_sub.setStyleSheet(
+            f"color: {COLOR_SEMANTIC_AMBIGUOUS_TEXT};{type_pin(sub_font)}"
+        )
         self._tiebreak_sub.hide()
         layout.addWidget(self._tiebreak_sub)
 
         # Neutral sub (working / no-file / no-tempo): 12px muted body line.
         self._neutral_sub = QLabel(self)
-        self._neutral_sub.setFont(ui_font(12))
+        neutral_sub_font = ui_font(12)
+        self._neutral_sub.setFont(neutral_sub_font)
         self._neutral_sub.setWordWrap(True)
-        self._neutral_sub.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")  # token: color.text.muted
+        self._neutral_sub.setStyleSheet(  # token: color.text.muted
+            f"color: {COLOR_TEXT_MUTED};{type_pin(neutral_sub_font)}"
+        )
         self._neutral_sub.hide()
         layout.addWidget(self._neutral_sub)
 
@@ -254,7 +278,9 @@ class VerdictBlock(QFrame):
 
         # Confirmed card's closing line: "saved as ground truth · undo".
         self._undo_line = QLabel(self)
-        self._undo_line.setFont(ui_font(12))
+        undo_font = ui_font(12)
+        self._undo_line.setFont(undo_font)
+        self._undo_line.setStyleSheet(type_pin(undo_font))  # colors are inline rich text
         self._undo_line.setTextFormat(Qt.TextFormat.RichText)
         self._undo_line.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse)
         self._undo_line.setText(
@@ -293,7 +319,7 @@ class VerdictBlock(QFrame):
         self._layout.setSpacing(7 if kind == "ambiguous" else 5)
 
         self._word_label.setText(display_word(view))
-        self._word_label.setStyleSheet(f"color: {word_color(kind)};")
+        self._word_label.setStyleSheet(f"color: {word_color(kind)};{self._word_pin}")
         if kind == "ambiguous":
             self._icon_label.setPixmap(diamond_pixmap(13, COLOR_SEMANTIC_AMBIGUOUS_BASE))
             self._icon_label.show()
@@ -320,9 +346,10 @@ class VerdictBlock(QFrame):
         self._reason_labels = []
         for reason in view.reasons:
             label = QLabel(reason, self._reasons_container)
-            label.setFont(ui_font(12))
+            reason_font = ui_font(12)
+            label.setFont(reason_font)
             label.setWordWrap(True)  # full reason, never truncated on the rail
-            label.setStyleSheet(f"color: {body_color(kind)};")
+            label.setStyleSheet(f"color: {body_color(kind)};{type_pin(reason_font)}")
             self._reasons_layout.addWidget(label)
             self._reason_labels.append(label)
         self._reasons_container.setVisible(bool(view.reasons))

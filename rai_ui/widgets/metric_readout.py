@@ -47,7 +47,7 @@ from rai_ui.theme._tokens_gen import (
     COLOR_TEXT_SECONDARY,
 )
 from rai_ui.widgets import mono_font, ui_font
-from rai_ui.widgets.verdict_block import VerdictBlock
+from rai_ui.widgets.verdict_block import VerdictBlock, type_pin
 
 RAIL_WIDTH = 236  # approved rail width (C-05 "rail width 236"; blessed literal, R2)
 
@@ -62,7 +62,9 @@ def group_label(text: str, parent: QWidget | None = None) -> QLabel:
     font = ui_font(11, QFont.Weight.Medium)
     font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 107.0)  # 0.07em
     label.setFont(font)
-    label.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")  # token: color.text.muted
+    # token: color.text.muted — type pinned widget-level (landmine 6); the
+    # 0.07em tracking stays on the QFont (letter-spacing is not a QSS prop).
+    label.setStyleSheet(f"color: {COLOR_TEXT_MUTED};{type_pin(font)}")
     return label
 
 
@@ -118,18 +120,27 @@ def metric_row(
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(4)
     name_label = QLabel(name, row)
-    name_label.setFont(ui_font(12))
-    name_label.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")  # token: color.text.secondary
+    name_font = ui_font(12)
+    name_label.setFont(name_font)
+    name_label.setStyleSheet(  # token: color.text.secondary
+        f"color: {COLOR_TEXT_SECONDARY};{type_pin(name_font)}"
+    )
     layout.addWidget(name_label)
     layout.addStretch(1)
     value_label = QLabel(row)
-    value_label.setFont(mono_font(16, QFont.Weight.DemiBold))  # metric row 16/600 (R2)
-    value_label.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")  # token: color.text.primary
+    value_font = mono_font(16, QFont.Weight.DemiBold)  # metric row 16/600 (R2)
+    value_label.setFont(value_font)
+    value_label.setStyleSheet(  # token: color.text.primary
+        f"color: {COLOR_TEXT_PRIMARY};{type_pin(value_font)}"
+    )
     layout.addWidget(value_label, 0, Qt.AlignmentFlag.AlignBottom)
     if unit is not None:
         unit_label = QLabel(unit, row)
-        unit_label.setFont(mono_font(10, QFont.Weight.Medium))  # unit 10/500
-        unit_label.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")  # token: color.text.muted
+        unit_font = mono_font(10, QFont.Weight.Medium)  # unit 10/500
+        unit_label.setFont(unit_font)
+        unit_label.setStyleSheet(  # token: color.text.muted
+            f"color: {COLOR_TEXT_MUTED};{type_pin(unit_font)}"
+        )
         layout.addWidget(unit_label, 0, Qt.AlignmentFlag.AlignBottom)
     return row, value_label
 
@@ -198,8 +209,11 @@ class MetricRail(QFrame):
         primary_layout.setSpacing(3)
         primary_layout.addWidget(group_label("Primary BPM", primary_group))
         self.primary_value = QLabel(primary_group)
-        self.primary_value.setFont(mono_font(40, QFont.Weight.DemiBold))  # rail primary 40/600 (R2)
-        self.primary_value.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")  # token: color.text.primary
+        primary_font = mono_font(40, QFont.Weight.DemiBold)  # rail primary 40/600 (R2)
+        self.primary_value.setFont(primary_font)
+        self.primary_value.setStyleSheet(  # token: color.text.primary
+            f"color: {COLOR_TEXT_PRIMARY};{type_pin(primary_font)}"
+        )
         primary_layout.addWidget(self.primary_value)
         primary_layout.addSpacing(2)  # tick margin-top 2 (CO:567)
         primary_layout.addWidget(TickBar("primary", 64, primary_group))  # 64×3 (CO:567)
@@ -217,21 +231,25 @@ class MetricRail(QFrame):
         felt_layout.setSpacing(3)
         felt_layout.addWidget(group_label("Felt", felt_group))
         self.felt_value = QLabel(felt_group)
-        self.felt_value.setFont(mono_font(24, QFont.Weight.Medium))  # rail felt 24/500 (R2)
-        self.felt_value.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")  # token: color.text.primary
+        felt_font = mono_font(24, QFont.Weight.Medium)  # rail felt 24/500 (R2)
+        self.felt_value.setFont(felt_font)
+        self.felt_value.setStyleSheet(  # token: color.text.primary
+            f"color: {COLOR_TEXT_PRIMARY};{type_pin(felt_font)}"
+        )
         felt_layout.addWidget(self.felt_value)
         felt_layout.addSpacing(2)
         felt_layout.addWidget(TickBar("felt", 44, felt_group))  # 44px dashed (CO:573)
         felt_row_layout.addWidget(felt_group)
         felt_row_layout.addStretch(1)
         self.felt_chip_label = QLabel(felt_row)
-        self.felt_chip_label.setFont(mono_font(11))
+        chip_font = mono_font(11)
+        self.felt_chip_label.setFont(chip_font)
         self.felt_chip_label.setFixedHeight(20)  # pill h20
         self.felt_chip_label.setStyleSheet(
             # token: color.border.strong / color.text.primary — neutral pill,
             # never the reserved marker hues (radius = half of h20).
             f"border: 1px solid {COLOR_BORDER_STRONG}; border-radius: 10px;"
-            f" padding: 0 9px; color: {COLOR_TEXT_PRIMARY};"
+            f" padding: 0 9px; color: {COLOR_TEXT_PRIMARY};{type_pin(chip_font)}"
         )
         self.felt_chip_label.hide()
         felt_row_layout.addWidget(self.felt_chip_label, 0, Qt.AlignmentFlag.AlignBottom)
@@ -273,9 +291,12 @@ class MetricRail(QFrame):
 
         # 6. Doctrine footer — exact copy, never reworded.
         self.footer_label = QLabel(RAIL_FOOTER, content)
-        self.footer_label.setFont(ui_font(11))
+        footer_font = ui_font(11)
+        self.footer_label.setFont(footer_font)
         self.footer_label.setWordWrap(True)
-        self.footer_label.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")  # token: color.text.muted
+        self.footer_label.setStyleSheet(  # token: color.text.muted
+            f"color: {COLOR_TEXT_MUTED};{type_pin(footer_font)}"
+        )
         layout.addWidget(self.footer_label)
 
         scroll.setWidget(content)

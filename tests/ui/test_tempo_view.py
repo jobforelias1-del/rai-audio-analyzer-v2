@@ -532,6 +532,21 @@ class TestWorkingBlanksEverything:
         assert r.lufs_text == EM_DASH and r.dbtp_text == EM_DASH and r.dbfs_text == EM_DASH
         assert r.verdict.word == "WORKING…"
 
+    def test_error_with_stale_result_blanks_all_surfaces(self):
+        # analyze(A) succeeds, analyze(B) fails: the session still holds A's
+        # result, but ERROR must not resurrect A's numbers under B's name
+        # (review finding 2026-07-07, runtime-reproduced).
+        st = state(VerdictKind.ERROR, error_msg="could not decode")
+        vm = build_tempo_view(make_result(), make_features(), st)
+        assert vm.has_result is False
+        assert vm.candidates == () and vm.markers == ()
+        assert vm.curve_bpms is None
+        r = vm.readout
+        assert r.primary_text == EM_DASH and r.felt_text == EM_DASH
+        assert r.lufs_text == EM_DASH
+        assert r.verdict.word == "ERROR"
+        assert r.verdict.reasons == ("could not decode",)  # error copy survives
+
     def test_non_working_states_still_render_the_result(self):
         vm = build_tempo_view(make_result(), make_features(), CONFIDENT)
         assert vm.has_result is True

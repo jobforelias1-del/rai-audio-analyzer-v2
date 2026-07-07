@@ -19,7 +19,7 @@ import pytest
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QRect, QSize, Qt
 
 from rai_analyzer.contracts import (
     AnalysisResult,
@@ -49,6 +49,7 @@ from rai_ui.widgets.candidate_table import (
     ROW_HEIGHT,
     ROW_ROLE,
     CandidatePane,
+    content_rect,
 )
 from rai_ui.widgets.chips import (
     CHIP_HEIGHT,
@@ -305,6 +306,31 @@ class TestViewConfig:
         for column, width in enumerate(COLUMN_WIDTHS):
             if width >= 0:
                 assert shown_pane.view.columnWidth(column) == width, column
+
+    def test_column_widths_fold_the_design_gap(self):
+        # Design grid `88px 168px 1fr 64px 56px 88px` + column-gap 12: Qt
+        # sections are contiguous, so every interior fixed column carries its
+        # trailing 12px gap (88→100, 168→180, 64→76, 56→68); the stretch
+        # column absorbs its own gap and the last column has none.
+        assert COLUMN_WIDTHS == (100, 180, -1, 76, 68, 88)
+
+    def test_content_rects_give_32px_spacing_and_track_aligned_edges(self):
+        # content_rect carves the design cell out of the widened sections:
+        # 10px padding both sides + the 12px gap on interior right edges, so
+        # adjacent content sits 10 + 12 + 10 = 32px apart (the design's gap
+        # geometry) and right content edges land on the design track edges.
+        widths = [240 if w < 0 else w for w in COLUMN_WIDTHS]  # stretch → 240
+        lefts = [sum(widths[:i]) for i in range(len(widths))]
+        rects = [
+            content_rect(QRect(x, 0, w, ROW_HEIGHT), column)
+            for column, (x, w) in enumerate(zip(lefts, widths))
+        ]
+        for prev, nxt in zip(rects, rects[1:]):
+            assert nxt.x() - (prev.x() + prev.width()) == 32
+        for column, (rect, x, w) in enumerate(zip(rects, lefts, widths)):
+            assert rect.x() == x + 10  # design cell padding-left
+            inset = 10 if column == len(widths) - 1 else 22  # 10 pad (+12 gap)
+            assert (x + w) - (rect.x() + rect.width()) == inset
 
 
 # ---------------------------------------------------------------------------

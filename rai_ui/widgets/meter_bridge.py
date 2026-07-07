@@ -56,6 +56,7 @@ from rai_ui.widgets.verdict_block import (
     body_color,
     diamond_pixmap,
     display_word,
+    type_pin,
     verdict_qss_property,
     word_color,
 )
@@ -142,13 +143,19 @@ def _value_row(cell: QWidget, size_px: int, weight: QFont.Weight, unit: str | No
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(4)
     value_label = QLabel(row)
-    value_label.setFont(mono_font(size_px, weight))
-    value_label.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY};")  # token: color.text.primary
+    value_font = mono_font(size_px, weight)
+    value_label.setFont(value_font)
+    value_label.setStyleSheet(  # token: color.text.primary
+        f"color: {COLOR_TEXT_PRIMARY};{type_pin(value_font)}"
+    )
     layout.addWidget(value_label, 0, Qt.AlignmentFlag.AlignBottom)
     if unit is not None:
         unit_label = QLabel(unit, row)
-        unit_label.setFont(mono_font(10, QFont.Weight.Medium))  # unit 10/500
-        unit_label.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")  # token: color.text.muted
+        unit_font = mono_font(10, QFont.Weight.Medium)  # unit 10/500
+        unit_label.setFont(unit_font)
+        unit_label.setStyleSheet(  # token: color.text.muted
+            f"color: {COLOR_TEXT_MUTED};{type_pin(unit_font)}"
+        )
         layout.addWidget(unit_label, 0, Qt.AlignmentFlag.AlignBottom)
     layout.addStretch(1)
     return row, value_label
@@ -188,7 +195,9 @@ class MeterBridge(QFrame):
         self._icon_label.setFixedSize(12, 12)
         self._icon_label.hide()
         self.word_label = QLabel(text_column)
-        self.word_label.setFont(mono_font(12, QFont.Weight.DemiBold))  # word 12/600
+        word_font = mono_font(12, QFont.Weight.DemiBold)  # word 12/600
+        self.word_label.setFont(word_font)
+        self._word_pin = type_pin(word_font)  # re-applied on every verdict restyle
         word_row.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
         word_row.addWidget(self.word_label, 0, Qt.AlignmentFlag.AlignVCenter)
         word_row.addStretch(1)
@@ -196,12 +205,16 @@ class MeterBridge(QFrame):
         reason_row = QHBoxLayout()
         reason_row.setSpacing(0)
         self.reason_label = ElidedLabel(text_column)
-        self.reason_label.setFont(ui_font(11))
+        reason_font = ui_font(11)
+        self.reason_label.setFont(reason_font)
+        self._reason_pin = type_pin(reason_font)  # re-applied on every verdict restyle
         reason_row.addWidget(self.reason_label, 1)
         # Confirmed's inline undo link sits OUTSIDE the elide so it survives
         # any reason length ("… · undo", CO:99).
         self._undo_link = QLabel(text_column)
-        self._undo_link.setFont(ui_font(11))
+        undo_font = ui_font(11)
+        self._undo_link.setFont(undo_font)
+        self._undo_link.setStyleSheet(type_pin(undo_font))  # colors are inline rich text
         self._undo_link.setTextFormat(Qt.TextFormat.RichText)
         self._undo_link.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse)
         self._undo_link.linkActivated.connect(lambda _href: self.undo_requested.emit())
@@ -250,8 +263,11 @@ class MeterBridge(QFrame):
 
         # 9. Doctrine caption — exact copy, never reworded.
         self.footer_label = QLabel(BRIDGE_FOOTER, self)
-        self.footer_label.setFont(ui_font(11))
-        self.footer_label.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")  # token: color.text.muted
+        footer_font = ui_font(11)
+        self.footer_label.setFont(footer_font)
+        self.footer_label.setStyleSheet(  # token: color.text.muted
+            f"color: {COLOR_TEXT_MUTED};{type_pin(footer_font)}"
+        )
         self.footer_label.setContentsMargins(16, 0, 16, 0)  # caption padding 0 16 (CO:148)
         outer.addWidget(self.footer_label, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -302,7 +318,7 @@ class MeterBridge(QFrame):
         )
 
         self.word_label.setText(display_word(verdict, bridge=True))
-        self.word_label.setStyleSheet(f"color: {word_color(kind)};")
+        self.word_label.setStyleSheet(f"color: {word_color(kind)};{self._word_pin}")
         if kind == "ambiguous":
             self._icon_label.setPixmap(diamond_pixmap(12, COLOR_SEMANTIC_AMBIGUOUS_BASE))
             self._icon_label.show()
@@ -317,7 +333,7 @@ class MeterBridge(QFrame):
             reason = (verdict.reasons[0] + " · ") if verdict.reasons else ""
         else:
             reason = verdict.sub or ""
-        self.reason_label.setStyleSheet(f"color: {body_color(kind)};")
+        self.reason_label.setStyleSheet(f"color: {body_color(kind)};{self._reason_pin}")
         self.reason_label.set_full_text(reason)
         if verdict.show_undo:
             self._undo_link.setText(

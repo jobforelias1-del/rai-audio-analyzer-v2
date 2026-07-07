@@ -284,6 +284,29 @@ def test_analysis_failure_renders_error_verdict(window, qtbot):
     assert not window.tempo_section.tempogram._overlay.isVisible()
 
 
+def test_failed_reanalysis_never_resurrects_previous_result(window, qtbot):
+    """analyze(A) ok → analyze(B) fails: B's ERROR must not wear A's numbers.
+
+    Review finding 2026-07-07 (3/3 verified): fail() keeps the session's
+    last_result, so without the ERROR blank in build_tempo_view every tempo
+    surface repopulated with file A's measurements under file B's name.
+    """
+    window.show()
+    finish_analysis(qtbot, window)  # file A lands
+    assert window.rail.primary_value.text() == "205.15"
+
+    window.session.begin("/tmp/fileB.wav")
+    with qtbot.waitSignal(window.session.analysis_failed):
+        window.session.fail("could not decode")
+
+    assert window.rail.verdict_block.view().kind == "error"
+    assert window.rail.primary_value.text() == "—"
+    assert window.bridge.primary_value.text() == "—"
+    assert window.tempo_section.candidates.model.rowCount() == 0
+    assert not window.tempo_section.tempogram._marker_lines["primary"].isVisible()
+    assert not window.tempo_section.tempogram._curve.isVisible()
+
+
 # ---------------------------------------------------------------------------
 # Recents pills polish (C-18)
 # ---------------------------------------------------------------------------

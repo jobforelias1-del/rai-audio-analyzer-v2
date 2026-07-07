@@ -353,13 +353,14 @@ def build_tempo_view(result, features, verdict_state: Optional[VerdictState]) ->
     if verdict_state is None:
         verdict_state = INITIAL
 
-    # RC ruling (M1): WORKING blanks everything. On a re-analysis the session
-    # still holds the PREVIOUS result until finish(); rendering it under the
-    # working overlays would show stale numbers as if current — the rail
-    # numerals aren't covered by any overlay. Absence (—) until the new
-    # measurement lands; the instrument never shows a number it didn't just
-    # measure.
-    if verdict_state.kind is VerdictKind.WORKING:
+    # RC ruling (M1): WORKING and ERROR blank everything. The session keeps
+    # the PREVIOUS result across begin() and fail() — rendering it under
+    # either state would attribute the old file's measurements to the new
+    # file (the rail numerals have no covering overlay, and a failed
+    # analysis of file B must not resurrect file A's numbers under B's
+    # name). Absence (—) until a fresh measurement lands; the instrument
+    # never shows a number it didn't just measure.
+    if verdict_state.kind in (VerdictKind.WORKING, VerdictKind.ERROR):
         result = None
         features = None
 
