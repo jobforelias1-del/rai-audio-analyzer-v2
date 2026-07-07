@@ -1,7 +1,9 @@
-# M2 Handoff — Phase 3 Engine-Additive DSP (built 2026-07-07 · awaiting operator acceptance)
+# M2 Handoff — Phase 3 Engine-Additive DSP (built 2026-07-07 · **OPERATOR-ACCEPTED 2026-07-07**)
 
-**Branch:** `phase3/m2-engine-dsp` @ `8842fbe` — **LOCAL-ONLY, not merged, not pushed.**
-Merging and M3 both wait on Elias's explicit call.
+**Acceptance:** Elias's pass, 12 screenshots — "everything looks and works great." Merge + M3 greenlit same day.
+**Known issue (accepted, not a blocker):** the Overview tab lags a beat on first click before rendering correctly — flagged by Elias at acceptance. Suspect the waveform envelope/first-paint path; **profile before fixing** (queued as the first M3 polish item; see M3 notes below).
+
+**Branch:** `phase3/m2-engine-dsp` @ `8842fbe` (+ handoff/close-out commits) — merged to main on Elias's greenlight.
 Baseline underneath: `main` @ `b9d6568` (M1 landed + operator-accepted 2026-07-07).
 **Existing engine files byte-untouched since `v3-baseline-phase0`** — M2 added only NEW files under `rai_analyzer/` (metrics/, beatgrid.py) + packaging metadata.
 
