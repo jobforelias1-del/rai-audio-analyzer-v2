@@ -28,9 +28,9 @@ def main(argv: Optional[list] = None) -> int:
     )
     parser.add_argument(
         "--smoke-audio",
-        metavar="PATH",
-        default=None,
-        help="analyze PATH during the smoke run (implies smoke mode)",
+        action="store_true",
+        help="during the smoke run, also play a 0.5 s test tone via the "
+        "audio output stack (the frozen audio spike; implies smoke mode)",
     )
     args = parser.parse_args(argv)
 
