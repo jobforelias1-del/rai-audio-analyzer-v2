@@ -451,9 +451,21 @@ if _QT_AVAILABLE:
             super().__init__(parent)
             self._generation = 0
             self._threads: list[tuple[QThread, RelearnWorker]] = []
+            self._active = False
 
         def is_running(self) -> bool:
-            return any(thread.isRunning() for thread, _worker in self._threads)
+            """Logically in flight: from start() until the ``finished`` relay.
+
+            Deliberately NOT ``thread.isRunning()``: the QThread is still
+            winding down when ``finished`` is relayed to subscribers, so a
+            thread-state gate would refuse an analysis started from inside a
+            finished handler — the exact race CI's slow runner exposed (and a
+            user dropping a file right after the relearn toast would hit).
+            All profile writes and the cache clear complete before the worker
+            emits its terminal signal, so "not active" at relay time is
+            truthful; ``_active`` flips False BEFORE the relay.
+            """
+            return self._active
 
         def start(self) -> bool:
             """Kick off a relearn; False if one is already running."""
@@ -462,6 +474,7 @@ if _QT_AVAILABLE:
                 return False
             self._generation += 1
             self._prune_finished_threads()
+            self._active = True
 
             thread = QThread(self)
             worker = RelearnWorker()  # no parent: moveToThread requires it
@@ -508,6 +521,7 @@ if _QT_AVAILABLE:
             process exit is the deliberate, safe choice; its worker is
             already cancelled and can no longer write anything.
             """
+            self._active = False  # shutdown: the gate must not block close
             self.cancel()
             for thread, worker in self._threads:
                 thread.quit()
@@ -537,6 +551,9 @@ if _QT_AVAILABLE:
 
         def _on_worker_finished(self, ok: bool, message: str) -> None:
             if self._sender_is_current():
+                # Flip BEFORE the relay: subscribers may start an analysis
+                # from inside their finished handler (see is_running()).
+                self._active = False
                 self.finished.emit(ok, message)
 
         def _prune_finished_threads(self) -> None:

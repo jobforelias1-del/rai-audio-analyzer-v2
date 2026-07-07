@@ -192,3 +192,20 @@ def test_controller_close_cancels_and_joins_within_bound(tmp_path, qtbot, monkey
     assert not controller.is_running()
     # close() during the run cancelled it before the write phase.
     assert not os.path.exists(gts.user_profile_path())
+
+
+def test_is_running_is_false_inside_the_finished_handler(tmp_path, qtbot, monkeypatch):
+    """The mutual-exclusion gate must admit work started FROM a finished
+    handler (regression: thread-state gating refused an analysis begun right
+    after the relearn toast — exposed by CI's slow runner, reachable by any
+    user dropping a file the moment relearn completes)."""
+    slow_stub_pipeline(monkeypatch, build_seconds=0.01)
+    confirm_three(tmp_path)
+
+    controller = relearn.RelearnController()
+    seen: list[bool] = []
+    controller.finished.connect(lambda ok, msg: seen.append(controller.is_running()))
+    with qtbot.waitSignal(controller.finished, timeout=30_000):
+        assert controller.start() is True
+    assert seen == [False]  # not "running" at relay time — the gate is open
+    controller.close()
