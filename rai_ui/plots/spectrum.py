@@ -24,7 +24,10 @@ plot deliberately flips the tempogram's vertical-grid orientation).
 
 Silence (R-M2-8): no curve — the well shows the authored copy
 (``vm.silent_text``) centered on the bed, C-17 neutral styling, exactly the
-tempogram's no-tempo pattern. C-17's "flat baseline" is already on screen:
+tempogram's no-tempo pattern. The UNMEASURABLE state (non-silent file, no
+finite spectrum bins — e.g. pure DC) rides the same label with
+``vm.unmeasurable_text``: the view-model owns both copies, the pane just
+shows whichever one is set. C-17's "flat baseline" is already on screen:
 the persistent 50% gridline is a 1px ``plot.grid`` horizontal — drawing a
 second grid-colored line at the same place would be a no-op, so no separate
 baseline item exists here (documented divergence from the tempogram, whose
@@ -219,7 +222,8 @@ class SpectrumPane(QFrame):
         self._plot.addItem(self._curve)
 
         # --- floating children (manual geometry, above the plot) --------------
-        # The silent-file copy (R-M2-8), C-17 neutral styling — the exact
+        # The well's copy label — carries BOTH the silent-file copy (R-M2-8)
+        # and the unmeasurable copy, one C-17 neutral treatment; the exact
         # no-tempo-label idiom from the tempogram.
         self._silent_label = QLabel(self)
         silent_font = QFont(TYPE_FAMILY_UI)
@@ -255,9 +259,13 @@ class SpectrumPane(QFrame):
             self._curve.setData([], [])
             self._curve.setVisible(False)
 
-        self._silent_label.setText(vm.silent_text or "")
+        # Silent and unmeasurable share one label; the view-model owns the
+        # copy (silence wins by construction — the builder never sets both).
+        # WORKING/ERROR blank both texts, so the label blanks with the rest.
+        well_text = vm.silent_text or vm.unmeasurable_text or ""
+        self._silent_label.setText(well_text)
         self._silent_label.adjustSize()
-        self._silent_label.setVisible(vm.silent)
+        self._silent_label.setVisible(bool(well_text))
 
         self._reposition_floats()
 

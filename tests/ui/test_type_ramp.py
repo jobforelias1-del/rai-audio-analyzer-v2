@@ -189,6 +189,41 @@ class TestM2PaneLabelsUnderRealTheme:
         font = _polished_font(themed_app, qtbot, pane, pane._title)
         _assert_type(font, SANS, 11, 500)  # pane label 11/500 (C-16)
 
+    def test_spectrum_pane_caption_is_sans_11(self, themed_app, qtbot):
+        # "average magnitude · log frequency" — designed text (design recon
+        # §7): 11px Plex Sans regular, NOT the app-wide 13px body rule.
+        from rai_ui.plots.spectrum import SpectrumPane
+
+        pane = SpectrumPane()
+        font = _polished_font(themed_app, qtbot, pane, pane._caption)
+        _assert_type(font, SANS, 11, 400)  # pane caption 11/400 (C-16)
+
+    def test_spectrum_well_copy_label_is_sans_13(self, themed_app, qtbot):
+        """The well's silent/unmeasurable copy label (R-M2-8 + the
+        unmeasurable state) is authored copy with a designed size. Its 13px
+        Plex Sans 400 coincides with the app-wide body rule TODAY, so this
+        pin can't fail through landmine 6 alone — it pins the DESIGNED value
+        so a future body-rule change cannot silently restyle the copy."""
+        import dataclasses
+
+        from rai_ui.plots.spectrum import SpectrumPane
+        from rai_ui.state.signal_view import (
+            EMPTY_SIGNAL_VIEW,
+            UNMEASURABLE_SPECTRUM_TEXT,
+        )
+
+        pane = SpectrumPane()
+        pane.set_view(
+            dataclasses.replace(
+                EMPTY_SIGNAL_VIEW,
+                unmeasurable=True,
+                unmeasurable_text=UNMEASURABLE_SPECTRUM_TEXT,
+            )
+        )
+        assert pane._silent_label.isVisibleTo(pane)  # copy actually shown
+        font = _polished_font(themed_app, qtbot, pane, pane._silent_label)
+        _assert_type(font, SANS, 13, 400)  # well copy 13/400 (C-17 neutral)
+
     def test_waveform_pane_title_is_sans_11(self, themed_app, qtbot):
         from rai_ui.plots.waveform import WaveformPane
 

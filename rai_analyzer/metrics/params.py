@@ -48,4 +48,6 @@ SIX_BAND_EDGES_HZ: tuple[tuple[str, float, float], ...] = (
 #: Guard for "no measurable energy" denominators (PSD totals, mid+side
 #: energies). Below this the quantity is undefined -> NaN, never a fake 0.0
 #: (v1's silence 0.0 lied — ruling R-M2-5's doctrine applied layer-wide).
+#: Consumers: :func:`.bands.compute_band_energies` (audible PSD total) and
+#: :func:`.stereo.compute_stereo` (mid+side energy denominator).
 ENERGY_EPS = 0.0

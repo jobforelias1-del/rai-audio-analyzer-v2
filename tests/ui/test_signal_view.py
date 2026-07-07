@@ -11,6 +11,10 @@ Edge-state matrix under test (design recon §3 + rulings):
 * silence: −∞ loudness/RMS are MEASUREMENTS, crest/sub/width are absence
   (``—``) chip-explained ``silent file``; the spectrum well shows copy, not a
   curve (R-M2-8).
+* unmeasurable: a NON-silent file with no finite spectrum bins (canonical
+  case: pure DC offset) — the well shows the unmeasurable copy, the NaN
+  shares chip ``no audible-band energy``, and the TRUE measurements (0.0 dB
+  crest, finite RMS/peak) render untouched.
 * mono: stereo width ``0 %`` — a measurement, no chip (R-M2-4).
 * short clip: LUFS ``—`` + ``undefined below 0.4 s``; DR still renders (the
   R-M2-6 divergence from the demo's scenario data).
@@ -42,6 +46,8 @@ from rai_ui.state.signal_view import (
     EMPTY_SIGNAL_VIEW,
     SILENT_SPECTRUM_TEXT,
     SPECTRUM_FLOOR_DB,
+    UNMEASURABLE_REASON,
+    UNMEASURABLE_SPECTRUM_TEXT,
     WAVEFORM_BINS,
     ChipNote,
     build_overview_view,
@@ -125,6 +131,20 @@ def mono_signal_result(**kw) -> SignalResult:
     return make_signal_result(width=0.0, correlation=None, **kw)
 
 
+def dc_signal_result() -> SignalResult:
+    """The engine's exact pure-DC shape (runtime-verified on
+    ``compute_signal_result`` with a constant 0.5 mono buffer): FINITE peak
+    and RMS (−6.02 dBFS), a TRUE 0.0 dB crest, but Welch's constant detrend
+    leaves every PSD bin −∞ → NaN band shares. NOT silent — the peak probe
+    is finite — yet nothing in the audible band measures."""
+    return SignalResult(
+        spectrum=silent_spectrum(),  # all-−∞ psd_db — no finite bins
+        dynamics=DynamicsResult(peak_dbfs=-6.02, rms_dbfs=-6.02, crest_db=0.0),
+        bands=make_bands(sub=NAN, bass=NAN),
+        stereo=StereoResult(width_pct=0.0, correlation=None),
+    )
+
+
 def state(kind: VerdictKind, **kw) -> VerdictState:
     return VerdictState(kind=kind, **kw)
 
@@ -163,6 +183,8 @@ class TestEmptySignalView:
         assert v.has_signal is False
         assert v.silent is False
         assert v.silent_text is None
+        assert v.unmeasurable is False
+        assert v.unmeasurable_text is None
         assert v.spectrum_freqs is None and v.spectrum_db is None
 
     def test_cards_all_absence_no_chips(self):
@@ -304,14 +326,21 @@ class TestSignalPopulated:
 
     def test_empty_spectrum_arrays_mean_no_curve(self):
         # A <2-sample clip measures an empty spectrum (engine contract); the
-        # cards still render, the well just has nothing to draw.
+        # cards still render. No finite bins means the well is UNMEASURABLE —
+        # it shows the explanatory copy rather than a mute blank bed.
         empty = SpectrumData(freqs=np.zeros(0), psd_db=np.zeros(0))
         vm = build_signal_view(
             make_result(), make_signal_result(spectrum=empty), CONFIDENT
         )
         assert vm.spectrum_freqs is None and vm.spectrum_db is None
         assert vm.silent is False  # not silence — there was signal, just no FFT
+        assert vm.unmeasurable is True
+        assert vm.unmeasurable_text == UNMEASURABLE_SPECTRUM_TEXT
         assert vm.dr_card.value_text == "8.2"
+        # Finite values never grow the chip — it rides only with "—".
+        assert vm.dr_card.chip is None
+        assert vm.sub_card.value_text == "21 %"
+        assert vm.sub_card.chip is None
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +358,13 @@ class TestSignalSilence:
         assert vm.silent is True
         assert vm.silent_text == SILENT_SPECTRUM_TEXT
         assert vm.silent_text == "no signal — silent file — nothing to measure"
+
+    def test_silence_wins_over_unmeasurable(self, vm):
+        # A silent file also has zero finite spectrum bins, but the two
+        # states are mutually exclusive — silence takes precedence and the
+        # well shows the R-M2-8 silent copy, not the unmeasurable copy.
+        assert vm.unmeasurable is False
+        assert vm.unmeasurable_text is None
 
     def test_no_curve_on_silence(self, vm):
         assert vm.spectrum_freqs is None and vm.spectrum_db is None
@@ -354,6 +390,73 @@ class TestSignalSilence:
         assert vm.width_card.value_text == "0 %"
         assert vm.width_card.chip is None
         assert vm.sub_card.value_text == EM_DASH  # shares stay undefined
+
+
+class TestSignalUnmeasurable:
+    """The unmeasurable state: non-silent file, zero finite spectrum bins.
+
+    Canonical case is a pure DC offset — the file is NOT silent (finite
+    −6.02 dBFS peak), but Welch's constant detrend leaves no finite PSD bins
+    and the band shares NaN. Pre-fix this rendered a BLANK well with no
+    explanatory copy and a chip-less ``—`` on the Sub/bass card."""
+
+    @pytest.fixture()
+    def vm(self):
+        return build_signal_view(make_result(), dc_signal_result(), CONFIDENT)
+
+    def test_flags_and_copy_verbatim(self, vm):
+        assert vm.has_signal is True
+        assert vm.silent is False
+        assert vm.silent_text is None
+        assert vm.unmeasurable is True
+        assert vm.unmeasurable_text == UNMEASURABLE_SPECTRUM_TEXT
+        assert (
+            vm.unmeasurable_text
+            == "no measurable signal — nothing in the audible band"
+        )
+
+    def test_no_curve(self, vm):
+        assert vm.spectrum_freqs is None and vm.spectrum_db is None
+
+    def test_nan_share_gets_the_reason_chip(self, vm):
+        # R-M2-10: the genuinely-NaN sub share reads "—" AND carries the
+        # C-06 chip explaining why (pre-fix it was a bare chip-less dash).
+        assert vm.sub_card.value_text == EM_DASH
+        assert vm.sub_card.chip == ChipNote(text=UNMEASURABLE_REASON)
+        assert vm.sub_card.chip == ChipNote(text="no audible-band energy")
+        assert vm.sub_card.gauge_frac == 0.0  # the demo's "— (bar 0)"
+
+    def test_true_measurements_are_never_suppressed(self, vm):
+        # A constant signal's 0.0 dB crest is TRUE (peak == RMS) — it renders
+        # as a measurement, no chip; ditto the finite RMS in the caption and
+        # the mono file's structural 0 % width.
+        assert vm.dr_card.value_text == "0.0"
+        assert vm.dr_card.chip is None
+        assert vm.dr_card.caption == "crest-based, whole file · RMS −6.0 dB"
+        assert vm.width_card.value_text == "0 %"
+        assert vm.width_card.chip is None
+
+    def test_dc_wav_end_to_end_through_real_engine(self):
+        # Same defect, zero fakes: a DC buffer through the REAL
+        # compute_signal_result (engine imported read-only), then the builder.
+        from rai_analyzer.metrics.compute import compute_signal_result
+
+        signal = SimpleNamespace(
+            y_native=np.full(48000, 0.5, dtype=np.float32), sr_native=48000
+        )
+        sr = compute_signal_result(signal)
+        assert math.isfinite(float(sr.dynamics.peak_dbfs))  # NOT silent
+        assert not np.isfinite(np.asarray(sr.spectrum.psd_db)).any()
+
+        vm = build_signal_view(make_result(), sr, CONFIDENT)
+        assert vm.silent is False
+        assert vm.unmeasurable is True
+        assert vm.unmeasurable_text == UNMEASURABLE_SPECTRUM_TEXT
+        assert vm.spectrum_freqs is None and vm.spectrum_db is None
+        assert vm.sub_card.value_text == EM_DASH
+        assert vm.sub_card.chip == ChipNote(text="no audible-band energy")
+        assert vm.dr_card.value_text == "0.0"  # crest is TRUE on a constant
+        assert vm.dr_card.chip is None
 
 
 class TestSignalMono:
@@ -392,10 +495,23 @@ class TestSignalBlankRule:
         vm = build_signal_view(make_result(), make_signal_result(), state(kind))
         assert vm.has_signal is False
         assert vm.silent is False
+        assert vm.unmeasurable is False
+        assert vm.unmeasurable_text is None
         assert vm.spectrum_freqs is None and vm.spectrum_db is None
         for card in (vm.width_card, vm.sub_card, vm.dr_card):
             assert card.value_text == EM_DASH
             assert card.chip is None  # dashes with NO chips (R-M2-10)
+
+    @pytest.mark.parametrize("kind", [VerdictKind.WORKING, VerdictKind.ERROR])
+    def test_blank_kinds_null_the_unmeasurable_state_too(self, kind):
+        # The new state must blank like everything else: a stored DC result
+        # shows NO copy and NO chips while WORKING/ERROR (R-M2-16 / R-M1-3).
+        vm = build_signal_view(make_result(), dc_signal_result(), state(kind))
+        assert vm.unmeasurable is False
+        assert vm.unmeasurable_text is None
+        assert vm.silent is False and vm.silent_text is None
+        assert vm.sub_card.chip is None
+        assert vm.dr_card.value_text == EM_DASH
 
     def test_non_blank_states_render(self):
         vm = build_signal_view(make_result(), make_signal_result(), CONFIDENT)
@@ -546,6 +662,18 @@ class TestOverviewDynamicsCard:
         assert vm.dynamics_card.rows[0].value_text == EM_DASH  # crest NaN
         assert vm.dynamics_card.chip == ChipNote(text="silent file")
 
+    def test_dc_file_keeps_chip_off_the_finite_dr_row(self):
+        # One chip slot, keyed off the DR row (the card's headline absence).
+        # On a DC file DR is a TRUE 0.0 measurement, so the card stays
+        # chip-less even though the sub share is "—" — the Signal section's
+        # Sub/bass GaugeCard is where that absence carries its chip.
+        vm = build_overview_view(
+            make_result(), None, dc_signal_result(), CONFIDENT
+        )
+        assert vm.dynamics_card.rows[0].value_text == "0.0"
+        assert vm.dynamics_card.rows[1].value_text == EM_DASH
+        assert vm.dynamics_card.chip is None
+
     def test_agrees_with_tempo_view_rail_strings(self):
         # The rail (tempo_view) and the Overview dynamics card format the
         # same SignalResult through the same formatters — byte-identical.
@@ -592,6 +720,24 @@ class TestOverviewFileCard:
         result.duration = 194.94
         vm = build_overview_view(result, None, None, CONFIDENT)
         assert vm.file_card.rows[1].value_text == "194.9 s"
+
+    def test_length_sub_second_keeps_two_decimals(self):
+        # The approved Console's short-clip edge state (04:699,
+        # kick_test.wav) prints "0.31 s" — 1 dp would collapse it to a
+        # near-meaningless "0.3 s".
+        result = make_result()
+        result.duration = 0.31
+        vm = build_overview_view(result, None, None, CONFIDENT)
+        assert vm.file_card.rows[1].value_text == "0.31 s"
+
+    def test_length_at_and_above_one_second_stays_one_decimal(self):
+        result = make_result()
+        result.duration = 8.0
+        vm = build_overview_view(result, None, None, CONFIDENT)
+        assert vm.file_card.rows[1].value_text == "8.0 s"
+        result.duration = 1.0
+        vm = build_overview_view(result, None, None, CONFIDENT)
+        assert vm.file_card.rows[1].value_text == "1.0 s"
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,8 @@ What matters here, per the M2 SPECTRUM manifest:
 * curve normalization: the displayed curve's max sits at the 0 dB top and
   nothing dips below the −90 dB floor,
 * silence renders the R-M2-8 copy and no curve; a later result recovers,
+* the unmeasurable state (non-silent, no finite spectrum bins — pure DC)
+  renders its own copy through the same label; WORKING/ERROR blank it,
 * the working sweep starts/stops with effective visibility — no timer leaks,
 * ``set_view`` is idempotent: a second identical call creates no duplicate
   plot items or child widgets.
@@ -47,13 +49,17 @@ from rai_ui.state.signal_view import (
     SILENT_SPECTRUM_TEXT,
     SPECTRUM_FLOOR_DB,
     SPECTRUM_TOP_DB,
+    UNMEASURABLE_SPECTRUM_TEXT,
     build_signal_view,
 )
+from rai_ui.state.verdict import VerdictKind
 from tests.ui.test_signal_view import (
     CONFIDENT,
+    dc_signal_result,
     make_signal_result,
     make_spectrum,
     silent_signal_result,
+    state,
 )
 
 PANE_SIZE = (900, 320)
@@ -68,6 +74,11 @@ def populated_vm(**signal_kw):
 
 def silent_vm():
     return build_signal_view(None, silent_signal_result(), CONFIDENT)
+
+
+def unmeasurable_vm():
+    """The DC-offset defect shape: non-silent, zero finite spectrum bins."""
+    return build_signal_view(None, dc_signal_result(), CONFIDENT)
 
 
 @pytest.fixture
@@ -233,6 +244,36 @@ def test_silence_after_result_drops_curve(pane):
     pane.set_view(silent_vm())
     assert not pane._curve.isVisible()
     assert pane._silent_label.isVisible()
+
+
+def test_unmeasurable_shows_copy_and_no_curve(pane):
+    # The DC-offset defect: pre-fix this state rendered a BLANK well. The
+    # unmeasurable copy rides the same label (same neutral treatment) as the
+    # R-M2-8 silent copy — the view-model owns the text.
+    vm = unmeasurable_vm()
+    assert vm.unmeasurable and not vm.silent
+    pane.set_view(vm)
+    assert pane._silent_label.isVisible()
+    assert pane._silent_label.text() == UNMEASURABLE_SPECTRUM_TEXT
+    assert not pane._curve.isVisible()
+
+
+def test_result_after_unmeasurable_recovers(pane):
+    pane.set_view(unmeasurable_vm())
+    pane.set_view(populated_vm())
+    assert pane._curve.isVisible()
+    assert not pane._silent_label.isVisible()
+
+
+@pytest.mark.parametrize("kind", [VerdictKind.WORKING, VerdictKind.ERROR])
+def test_blank_kinds_hide_the_unmeasurable_copy(pane, kind):
+    # WORKING/ERROR blank rule: the new state blanks like everything else —
+    # a stored DC result must not leave its copy on a working/errored well.
+    pane.set_view(unmeasurable_vm())
+    assert pane._silent_label.isVisible()
+    pane.set_view(build_signal_view(None, dc_signal_result(), state(kind)))
+    assert not pane._silent_label.isVisible()
+    assert not pane._curve.isVisible()
 
 
 # ---------------------------------------------------------------------------

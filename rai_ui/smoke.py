@@ -15,10 +15,19 @@ Under ``smoke_frozen.sh`` the probe must exercise the native cocoa platform
 (the v2 crash only reproduced there); under CI, where the variable is already
 ``offscreen``, it simply proceeds under it.
 
-Exit codes: 0 = pass · 1 = failure (window/DnD/analysis) · 2 = analysis
-timeout. Audio playback problems are REPORTED (``audio_ok``/``audio_error``)
-but never fail the probe — CI runners and headless Macs have no output
-device, and that says nothing about the build.
+Exit codes: 0 = pass · 1 = failure · 2 = analysis timeout. EXIT_OK requires
+ALL of ``window_shown``, ``accepts_drops``, ``dnd_delivered``,
+``analysis_ok``, ``tempo_ok`` and ``signal_ok`` to be truthy (see
+:data:`REQUIRED_TRUE_KEYS` / :func:`exit_code_for`). ``tempo_ok`` and
+``signal_ok`` are load-bearing here, not advisory: the worker deliberately
+degrades a metrics-layer crash to ``SignalResult=None`` (R-M2-15 — the
+analysis stays green by design), so the exit code is the ONLY gate that
+catches a silently-dead M1/M2 rendering layer. ``build/smoke_frozen.sh``
+keys probe 1 off this exit code; its ``check_json`` field asserts are an
+independent, additive layer and stay unchanged. Audio playback problems are
+REPORTED (``audio_ok``/``audio_error``) but never fail the probe — CI
+runners and headless Macs have no output device, and that says nothing
+about the build.
 """
 
 from __future__ import annotations
@@ -33,6 +42,35 @@ import traceback
 EXIT_OK = 0
 EXIT_FAILED = 1
 EXIT_TIMEOUT = 2
+
+#: Report keys that must ALL be truthy for EXIT_OK. ``tempo_ok``/``signal_ok``
+#: joined the required set when review found them write-only: a metrics-layer
+#: death degrades to ``SignalResult=None`` with ``analysis_ok`` still true, so
+#: an exit code keyed on analysis alone would stay green through it.
+REQUIRED_TRUE_KEYS = (
+    "window_shown",
+    "accepts_drops",
+    "dnd_delivered",
+    "analysis_ok",
+    "tempo_ok",
+    "signal_ok",
+)
+
+
+def exit_code_for(report: dict, timed_out: bool) -> int:
+    """Pure exit-code policy — the one place pass/fail is decided.
+
+    Kept free of Qt and side effects so the failure direction is unit-testable
+    (``tests/ui/test_smoke_exit.py``): timeout wins, then EXIT_OK only when
+    every :data:`REQUIRED_TRUE_KEYS` entry is truthy (``None`` — never
+    computed — fails exactly like ``False``). ``audio_ok`` is deliberately
+    absent: the audio spike is reported, never required.
+    """
+    if timed_out:
+        return EXIT_TIMEOUT
+    if all(bool(report.get(key)) for key in REQUIRED_TRUE_KEYS):
+        return EXIT_OK
+    return EXIT_FAILED
 
 # The synthetic fixture: an 8 s drill pattern at a notated 140 BPM — long
 # enough for a stable tempogram, short enough that the whole probe stays
@@ -174,22 +212,26 @@ def _probe(report: dict, want_audio: bool) -> int:
             report["analysis_ok"] = True
             report["bpm"] = round(float(result.tempo.primary_bpm), 2)
             report["ambiguous"] = bool(result.tempo.ambiguous)
-            # M1 additive check: the Tempo section actually rendered the
-            # result — at least one plot marker and one candidate table row.
-            # ADDITIVE key: build/smoke_frozen.sh's check_json reads only the
-            # keys it knows, so older tooling tolerates this one.
+            # M1 check: the Tempo section actually rendered the result — at
+            # least one plot marker and one candidate table row. REQUIRED for
+            # EXIT_OK (see REQUIRED_TRUE_KEYS); as a JSON key it stays
+            # additive — build/smoke_frozen.sh's check_json reads only the
+            # keys it knows, so older tooling tolerates it.
             vm = window.tempo_section.view()
             report["tempo_ok"] = bool(
                 len(vm.markers) >= 1
                 and window.tempo_section.candidates.model.rowCount() >= 1
             )
-            # M2 additive check: the Signal section actually rendered the
-            # metrics — a populated spectrum curve and all three metric cards
-            # showing measurements, not absence dashes. The fixture is a mono
+            # M2 check: the Signal section actually rendered the metrics — a
+            # populated spectrum curve and all three metric cards showing
+            # measurements, not absence dashes. The fixture is a mono
             # synthetic, so Stereo width legitimately reads "0 %" (a
             # measurement, R-M2-4) — any non-dash value counts as populated.
-            # ADDITIVE key, same contract as tempo_ok above: check_json reads
-            # only the keys it knows.
+            # REQUIRED for EXIT_OK, same contract as tempo_ok above: the
+            # worker degrades a metrics crash to SignalResult=None while
+            # analysis_ok stays true (R-M2-15), so this key in the exit code
+            # is what stops that death from passing the gate silently. As a
+            # JSON key it stays additive for check_json.
             svm = window.signal_section.view()
             dash = "—"  # em dash — absence, never a measurement
             report["signal_ok"] = bool(
@@ -213,11 +255,7 @@ def _probe(report: dict, want_audio: bool) -> int:
         window.close()
         app.processEvents()
 
-        if timed_out:
-            return EXIT_TIMEOUT
-        if report["dnd_delivered"] and report["analysis_ok"]:
-            return EXIT_OK
-        return EXIT_FAILED
+        return exit_code_for(report, timed_out)
     finally:
         try:
             os.unlink(wav_path)

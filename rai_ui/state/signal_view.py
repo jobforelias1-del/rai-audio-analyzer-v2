@@ -23,6 +23,12 @@ Doctrine enforced here (so the widgets cannot get it wrong):
 * **Spectrum display normalization** (R-M2-7): the engine's ``psd_db`` is
   unnormalized; here it becomes max-at-0 dB with a −90 dB floor. Silence has
   no curve at all — the well shows :data:`SILENT_SPECTRUM_TEXT` (R-M2-8).
+* **Unmeasurable spectrum**: a NON-silent file whose spectrum has no finite
+  bins (canonical case: pure DC offset — finite peak, but Welch's constant
+  detrend leaves every PSD bin −∞ and all band shares NaN) shows
+  :data:`UNMEASURABLE_SPECTRUM_TEXT` in the well and chips the NaN shares
+  ``no audible-band energy``. Genuine measurements are never suppressed —
+  a DC file's 0.0 dB crest is TRUE and renders (chips ride only with ``—``).
 * **Waveform envelope** (R-M2-9): min/max decimation at 2048 bins over a
   DISPLAY-ONLY channel mean of ``y_native`` — measurements never use that
   downmix (the engine's metrics layer measures per-channel).
@@ -85,6 +91,19 @@ WAVEFORM_BINS = 2048
 # "no periodicity — silent file, nothing to track" pattern, C-17 neutral
 # styling. Authored by RC (the design never wrote the spectrum variant).
 SILENT_SPECTRUM_TEXT = "no signal — silent file — nothing to measure"
+
+# The spectrum well's UNMEASURABLE copy: a non-silent file (finite peak) whose
+# spectrum has no finite bins, so there is no curve to draw and no shares to
+# print. Same neutral treatment as the silent copy — the pane renders both
+# through one label, and this pure layer owns the text. Authored by RC
+# (defect fix — the approved design never reached this state).
+UNMEASURABLE_SPECTRUM_TEXT = "no measurable signal — nothing in the audible band"
+
+# The C-06 chip reason paired with the unmeasurable state (R-M2-10): the NaN
+# band shares read "—" and this explains why. Kept here rather than in
+# formatters._UNAVAILABILITY_REASONS because it is M2-spectrum-specific copy
+# (the formatters vocabulary stays the loudness-lane trio).
+UNMEASURABLE_REASON = "no audible-band energy"
 
 # Overview verdict-line vocabulary (R-M2-20, Console 04:816–817 verbatim).
 # The ambiguous word is exported so the TempoCard widget keys its drawn ◆
@@ -191,6 +210,8 @@ class SignalViewModel:
     has_signal: bool  # a SignalResult is present (and not blanked)
     silent: bool  # digitally silent file — spectrum shows copy, not a curve
     silent_text: Optional[str]  # SILENT_SPECTRUM_TEXT when silent (R-M2-8)
+    unmeasurable: bool  # non-silent but no finite spectrum bins (e.g. pure DC)
+    unmeasurable_text: Optional[str]  # UNMEASURABLE_SPECTRUM_TEXT when set
     spectrum_freqs: "Optional[np.ndarray]"  # (k,) Hz, log-x domain
     spectrum_db: "Optional[np.ndarray]"  # (k,) normalized: max 0 dB, floor −90
     width_card: GaugeCardView
@@ -224,16 +245,37 @@ def _is_silent(signal_result) -> bool:
     return not math.isfinite(float(signal_result.dynamics.peak_dbfs))
 
 
-def _absence_reason(result, signal_result, silent: bool) -> Optional[str]:
+def _is_unmeasurable(signal_result, silent: bool) -> bool:
+    """A present, NON-silent result whose spectrum has no finite bins: the
+    file has a finite peak but nothing measurable in the audible band.
+    Canonical case is a pure DC offset — Welch's constant detrend leaves
+    every PSD bin −∞ and the band shares NaN. A degenerate empty spectrum
+    (<2-sample clip) has no finite bins either and reads the same way.
+    Mutually exclusive with ``silent`` by construction (silence wins)."""
+    if signal_result is None or silent:
+        return False
+    db = np.asarray(signal_result.spectrum.psd_db, dtype=np.float64)
+    return not bool(np.isfinite(db).any())
+
+
+def _absence_reason(
+    result, signal_result, silent: bool, unmeasurable: bool = False
+) -> Optional[str]:
     """The C-06 reason (if any) explaining why the M2 metrics read ``—``.
 
     * silent file → ``silent file`` (shares/crest are undefined on silence);
+    * unmeasurable (non-silent, no finite spectrum bins) →
+      ``no audible-band energy`` — chips ride only with ``—`` (R-M2-10), so
+      the genuinely-NaN shares grow the chip while real measurements (a DC
+      file's TRUE 0.0 dB crest) render untouched;
     * analysis succeeded but metrics degraded to None (R-M2-15) →
       ``unavailable for this file``;
     * no analysis at all (empty / WORKING / ERROR) → no reason, no chips.
     """
     if silent:
         return unavailability_reason("silence")
+    if unmeasurable:
+        return UNMEASURABLE_REASON
     if result is not None and signal_result is None:
         return unavailability_reason("failed")
     return None
@@ -354,13 +396,16 @@ def build_signal_view(result, signal_result, verdict_state: Optional[VerdictStat
 
     has_signal = signal_result is not None
     silent = has_signal and _is_silent(signal_result)
-    reason = _absence_reason(result, signal_result, silent)
+    unmeasurable = _is_unmeasurable(signal_result, silent)
+    reason = _absence_reason(result, signal_result, silent, unmeasurable)
     freqs, db = _normalized_spectrum(signal_result, silent)
 
     return SignalViewModel(
         has_signal=has_signal,
         silent=silent,
         silent_text=SILENT_SPECTRUM_TEXT if silent else None,
+        unmeasurable=unmeasurable,
+        unmeasurable_text=UNMEASURABLE_SPECTRUM_TEXT if unmeasurable else None,
         spectrum_freqs=freqs,
         spectrum_db=db,
         width_card=_width_card(signal_result, reason),
@@ -424,7 +469,9 @@ def _loudness_card(result) -> RowsCardView:
     return RowsCardView(label="Loudness", rows=rows, chip=chip)
 
 
-def _dynamics_card(result, signal_result, silent: bool) -> RowsCardView:
+def _dynamics_card(
+    result, signal_result, silent: bool, unmeasurable: bool = False
+) -> RowsCardView:
     if signal_result is not None:
         crest = signal_result.dynamics.crest_db
         sub = signal_result.bands.sub_pct
@@ -439,7 +486,10 @@ def _dynamics_card(result, signal_result, silent: bool) -> RowsCardView:
     )
     # One chip slot per card: keyed off the DR row (the card's headline
     # absence — silence dashes all three, metrics-failure dashes all three).
-    reason = _absence_reason(result, signal_result, silent)
+    # The unmeasurable flag rides through for one-truth with the Signal
+    # section; on a DC file the DR row is a real measurement ("0.0"), so this
+    # card correctly stays chip-less there.
+    reason = _absence_reason(result, signal_result, silent, unmeasurable)
     return RowsCardView(
         label="Dynamics", rows=rows, chip=_chip_if_absent(dr_text, reason)
     )
@@ -464,7 +514,12 @@ def _file_card(result) -> RowsCardView:
         name = length = rate = channels = EM_DASH
     else:
         name = os.path.basename(str(result.path))
-        length = f"{float(result.duration):.1f} s"  # demo: "194.9 s"
+        duration = float(result.duration)
+        # Demo: "194.9 s" (1 dp) — but the approved Console's short-clip edge
+        # state (04:699, kick_test.wav) prints "0.31 s": below 1 s the second
+        # decimal is the only significant digit, so sub-second lengths keep
+        # 2 dp instead of collapsing to "0.3 s".
+        length = f"{duration:.2f} s" if duration < 1.0 else f"{duration:.1f} s"
         rate = f"{_group_thousands(result.sr)} Hz"  # demo: "44 100 Hz"
         channels = _channels_text(int(result.channels))
     rows = (
@@ -515,13 +570,14 @@ def build_overview_view(
 
     has_result = result is not None
     silent = signal_result is not None and _is_silent(signal_result)
+    unmeasurable = _is_unmeasurable(signal_result, silent)
     wave_mins, wave_maxs = _wave_envelope(signal_obj)
 
     return OverviewViewModel(
         has_result=has_result,
         tempo_card=_tempo_card(result, verdict_state),
         loudness_card=_loudness_card(result),
-        dynamics_card=_dynamics_card(result, signal_result, silent),
+        dynamics_card=_dynamics_card(result, signal_result, silent, unmeasurable),
         file_card=_file_card(result),
         wave_mins=wave_mins,
         wave_maxs=wave_maxs,

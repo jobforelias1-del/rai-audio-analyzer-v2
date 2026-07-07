@@ -17,7 +17,7 @@ from __future__ import annotations
 import numpy as np
 
 from .contracts import BandEnergyResult
-from .params import SIX_BAND_EDGES_HZ
+from .params import ENERGY_EPS, SIX_BAND_EDGES_HZ
 from .spectrum import audible_mask
 
 
@@ -35,7 +35,7 @@ def compute_band_energies(freqs: np.ndarray, psd: np.ndarray) -> BandEnergyResul
     audible = audible_mask(freqs)
     total = float(np.sum(psd[audible])) if freqs.size else 0.0
 
-    if total <= 0.0:
+    if total <= ENERGY_EPS:
         nan = float("nan")
         six = {name: nan for name, _lo, _hi in SIX_BAND_EDGES_HZ}
         return BandEnergyResult(sub_pct=nan, bass_pct=nan, six_band=six)

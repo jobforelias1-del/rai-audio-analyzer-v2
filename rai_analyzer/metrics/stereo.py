@@ -25,6 +25,7 @@ from __future__ import annotations
 import numpy as np
 
 from .contracts import StereoResult
+from .params import ENERGY_EPS
 
 
 def compute_stereo(y_native: np.ndarray) -> StereoResult:
@@ -44,7 +45,7 @@ def compute_stereo(y_native: np.ndarray) -> StereoResult:
     side_e = float(np.sum(np.square(side)))
 
     denom = mid_e + side_e
-    if denom <= 0.0:
+    if denom <= ENERGY_EPS:
         # Digital silence in a stereo container: width is undefined.
         return StereoResult(width_pct=float("nan"), correlation=None)
 
