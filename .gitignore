@@ -33,3 +33,10 @@ build/RAIAudioAnalyzer/
 rai_analyzer/fingerprints/drill.bootstrap.json
 rai_analyzer/fingerprints/drill.committed.json
 rai_analyzer/fingerprints/drill.learned.json
+
+# Phase 3 UI venv
+.venv-v3/
+
+# Phase 3 frozen-build outputs
+dist-v3/
+build/RAIv3-work/

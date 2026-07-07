@@ -1,0 +1,224 @@
+/* app.qss.tmpl — RAI v3 M0 stylesheet template.
+ *
+ * Placeholders are brace-wrapped dotted token paths resolved against
+ * rai_ui/theme/rai.tokens.json by tools/gen_theme.py; an optional
+ * alphaNN modifier (pipe-separated) renders a hex token as rgba at NN%.
+ * Edit THIS file and the tokens, never app.qss.
+ *
+ * Pill rule: Qt QSS silently drops any border-radius larger than half the
+ * box height, so radius.pill (999) is never emitted verbatim. Pill corners
+ * are written as computed radii — a 24px-tall chip gets 12px corners — and
+ * the generator hard-fails on any emitted radius above 24px.
+ *
+ * Scope: M0 widgets only, selected via objectName or dynamic properties.
+ */
+
+/* ---- canvas + base type ------------------------------------------------ */
+
+QMainWindow {
+    background-color: #0C0F12;
+}
+
+QWidget {
+    font-family: "IBM Plex Sans";
+    font-size: 13px;
+    color: #E9EDF2;
+}
+
+/* ---- header: unified 48px chrome bar ----------------------------------- */
+
+QWidget#Header {
+    background-color: #181D24;
+    min-height: 48px;
+    max-height: 48px;
+    border-bottom: 1px solid #242B34;
+}
+
+/* ---- nav rail ----------------------------------------------------------- */
+
+QToolButton[nav="true"] {
+    background-color: transparent;
+    color: #A8B2BF;
+    border: none;
+    /* reserve the accent bar so checking does not shift the label */
+    border-left: 3px solid transparent;
+    padding: 8px 12px;
+    min-height: 24px;
+}
+
+QToolButton[nav="true"]:hover {
+    background-color: #1C232B;
+    color: #E9EDF2;
+}
+
+QToolButton[nav="true"]:pressed {
+    background-color: #232B34;
+}
+
+QToolButton[nav="true"]:checked {
+    background-color: #232B34;
+    color: #57C2D6;
+    border-left: 3px solid #57C2D6;
+}
+
+/* ghost destinations (built but not wired in M0): 38% text opacity —
+   QSS has no widget opacity property, so the dim is carried by the color */
+QToolButton[nav="true"][ghost="true"]:disabled {
+    background-color: transparent;
+    color: rgba(168, 178, 191, 38%);
+}
+
+/* ---- status bar ---------------------------------------------------------- */
+
+QWidget#StatusBar {
+    background-color: #12161B;
+    min-height: 28px;
+    max-height: 28px;
+    border-top: 1px solid #242B34;
+}
+
+QLabel[role="status"] {
+    background: transparent;
+    color: #7E8896;
+    font-family: "IBM Plex Mono";
+    font-size: 11px;
+}
+
+/* ---- buttons ------------------------------------------------------------- */
+
+QPushButton[variant="primary"] {
+    background-color: #57C2D6;
+    color: #06171C;
+    border: none;
+    border-radius: 7px;
+    font-weight: 600;
+}
+
+QPushButton[variant="primary"]:hover {
+    background-color: #73CFE0;
+}
+
+QPushButton[variant="primary"]:pressed {
+    background-color: #3EA8BC;
+}
+
+QPushButton[variant="primary"]:disabled {
+    background-color: #232B34;
+    color: #4A535F;
+}
+
+QPushButton[variant="secondary"] {
+    background-color: #181D24;
+    color: #E9EDF2;
+    border: 1px solid #333D49;
+    border-radius: 7px;
+    font-weight: 500;
+}
+
+QPushButton[variant="secondary"]:hover {
+    background-color: #1C232B;
+}
+
+QPushButton[variant="secondary"]:pressed {
+    background-color: #232B34;
+}
+
+QPushButton[variant="secondary"]:disabled {
+    color: #4A535F;
+    border-color: #242B34;
+}
+
+QPushButton[variant="ghost"] {
+    background-color: transparent;
+    color: #A8B2BF;
+    border: none;
+    border-radius: 7px;
+    font-weight: 500;
+}
+
+QPushButton[variant="ghost"]:hover {
+    background-color: #1C232B;
+    color: #E9EDF2;
+}
+
+QPushButton[variant="ghost"]:pressed {
+    background-color: #232B34;
+}
+
+QPushButton[variant="ghost"]:disabled {
+    color: #4A535F;
+}
+
+/* control heights are content-box, so vertical padding stays 0 */
+
+QPushButton[size="s"] {
+    min-height: 24px;
+    max-height: 24px;
+    padding: 0 12px;
+    font-size: 12px;
+}
+
+QPushButton[size="m"] {
+    min-height: 30px;
+    max-height: 30px;
+    padding: 0 16px;
+    font-size: 13px;
+}
+
+QPushButton[size="l"] {
+    min-height: 38px;
+    max-height: 38px;
+    padding: 0 20px;
+    font-size: 15px;
+}
+
+/* ---- chip (pill) --------------------------------------------------------- */
+
+QLabel[role="chip"] {
+    background-color: #181D24;
+    color: #A8B2BF;
+    border: 1px solid #333D49;
+    /* pill on a 24px-tall chip: computed radius = height / 2 (see header) */
+    border-radius: 12px;
+    min-height: 24px;
+    max-height: 24px;
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+/* ---- report view ---------------------------------------------------------- */
+
+QTextEdit[role="report"] {
+    background-color: #090B0D;
+    color: #E9EDF2;
+    font-family: "IBM Plex Mono";
+    font-size: 13px;
+    border: 1px solid #242B34;
+    border-radius: 12px;
+    padding: 12px;
+    selection-background-color: #11333B;
+    selection-color: #E9EDF2;
+}
+
+/* ---- empty state ----------------------------------------------------------- */
+
+QLabel[role="empty-title"] {
+    background: transparent;
+    color: #A8B2BF;
+    font-size: 15px;
+}
+
+QLabel[role="empty-hint"] {
+    background: transparent;
+    color: #7E8896;
+    font-size: 13px;
+}
+
+/* ---- toast ------------------------------------------------------------------ */
+
+QFrame[role="toast"] {
+    background-color: #1F262E;
+    border: 1px solid #242B34;
+    border-radius: 7px;
+}

@@ -1,0 +1,141 @@
+{
+  "$meta": {
+    "name": "RAI Design Tokens",
+    "version": "0.1.1",
+    "date": "2026-07-06",
+    "theme": "dark (v3 default and only)",
+    "targets": ["Qt 6 / PySide6 QSS", "pyqtgraph"],
+    "notes": [
+      "All surfaces are solid colors. No translucency, no blur, no gradients.",
+      "Numbers are unitless px unless a unit is stated.",
+      "Semantic colors are reserved for meaning: never use verdict colors decoratively, never use the accent for verdicts.",
+      "Every numeral renders in family.numeric with tabular figures.",
+      "Aliased values repeat the hex for direct QSS translation; 'alias' names the source."
+    ]
+  },
+
+  "color": {
+    "surface": {
+      "canvas":  { "value": "#0C0F12", "use": "app window background" },
+      "panel":   { "value": "#12161B", "use": "panes, sidebars, rails" },
+      "raised":  { "value": "#181D24", "use": "cards, toolbar, candidate rows" },
+      "overlay": { "value": "#1F262E", "use": "menus, popovers, tooltips" },
+      "inset":   { "value": "#090B0D", "use": "plot wells (tempogram, waveform, spectrum beds)" },
+      "hover":   { "value": "#1C232B", "use": "hover on panel/raised" },
+      "active":  { "value": "#232B34", "use": "pressed / selected rows" }
+    },
+    "border": {
+      "hairline": { "value": "#242B34", "use": "default 1px separators, pane edges" },
+      "strong":   { "value": "#333D49", "use": "control outlines, table header rule" },
+      "focus":    { "value": "#57C2D6", "alias": "color.accent.base", "use": "keyboard focus ring" }
+    },
+    "text": {
+      "primary":   { "value": "#E9EDF2" },
+      "secondary": { "value": "#A8B2BF" },
+      "muted":     { "value": "#7E8896", "use": "captions, axis labels, disabled-adjacent" },
+      "disabled":  { "value": "#4A535F" },
+      "inverse":   { "value": "#0B0E11", "use": "text on accent/semantic fills" }
+    },
+    "accent": {
+      "base":    { "value": "#57C2D6", "use": "interactive: primary buttons, selection, links, focus" },
+      "hover":   { "value": "#73CFE0" },
+      "pressed": { "value": "#3EA8BC" },
+      "bg":      { "value": "#11333B", "use": "selected-item background, subtle accent wash (solid)" },
+      "on":      { "value": "#06171C", "use": "text/icon on accent fill" }
+    },
+    "semantic": {
+      "confident": {
+        "base":   { "value": "#45C97B", "use": "verdict Confident / Confirmed·human" },
+        "bg":     { "value": "#0E2D1D" },
+        "border": { "value": "#1C5638" },
+        "text":   { "value": "#8FE8B4", "use": "confident body text on bg" },
+        "on":     { "value": "#06170E" }
+      },
+      "ambiguous": {
+        "base":   { "value": "#E4574D", "use": "verdict Ambiguous — human tiebreak" },
+        "bg":     { "value": "#341413" },
+        "border": { "value": "#6E2722" },
+        "text":   { "value": "#F49A93" },
+        "on":     { "value": "#1C0806" }
+      },
+      "marker-primary": {
+        "base": { "value": "#E9A23F", "use": "primary-BPM marker: tempogram line, numeral tick, chips" },
+        "bg":   { "value": "#3B2B11" },
+        "text": { "value": "#F5C67F" }
+      },
+      "marker-felt": {
+        "base": { "value": "#A58CF2", "use": "felt-BPM marker: tempogram dashed line, numeral tick, chips" },
+        "bg":   { "value": "#251C40" },
+        "text": { "value": "#C9B8F8" }
+      }
+    },
+    "plot": {
+      "grid":        { "value": "#1B2129", "use": "pyqtgraph grid lines on inset" },
+      "axis-text":   { "value": "#7E8896", "alias": "color.text.muted" },
+      "data-a":      { "value": "#57C2D6", "alias": "color.accent.base", "use": "salience curve, waveform, spectrum (track A)" },
+      "data-a-fill": { "value": "#123038", "use": "solid area fill under data-a" },
+      "data-b":      { "value": "#E87BAF", "use": "Compare track B" },
+      "data-b-fill": { "value": "#3A1B2B" },
+      "band":        { "value": "#151B22", "use": "genre-band region on tempogram (solid, under curve)" }
+    }
+  },
+
+  "type": {
+    "family": {
+      "ui":      { "value": "IBM Plex Sans", "fallback": "-apple-system, Helvetica Neue, sans-serif" },
+      "numeric": { "value": "IBM Plex Mono", "fallback": "SF Mono, Menlo, monospace", "use": "every measurement, table numeral, code/CLI" }
+    },
+    "weight": { "regular": 400, "medium": 500, "semibold": 600 },
+    "features": { "numerals": "tabular (tnum) wherever family.ui shows digits" },
+    "scale": {
+      "caption":     { "size": 11, "line": 16, "family": "ui", "weight": 400, "use": "footnotes, axis captions" },
+      "label":       { "size": 12, "line": 16, "family": "ui", "weight": 500, "tracking": "0.07em", "transform": "uppercase", "use": "metric labels, table headers" },
+      "body":        { "size": 13, "line": 20, "family": "ui", "weight": 400, "use": "default UI text" },
+      "body-lg":     { "size": 15, "line": 22, "family": "ui", "weight": 400, "use": "reason sentences, empty-state copy" },
+      "title":       { "size": 17, "line": 24, "family": "ui", "weight": 600, "use": "pane titles" },
+      "metric-s":    { "size": 22, "line": 26, "family": "numeric", "weight": 500, "use": "secondary metrics (DR, sub %, width)" },
+      "metric-m":    { "size": 30, "line": 34, "family": "numeric", "weight": 500, "use": "loudness trio, felt BPM" },
+      "metric-l":    { "size": 44, "line": 48, "family": "numeric", "weight": 500, "use": "tiebreak candidate BPM" },
+      "metric-hero": { "size": 64, "line": 66, "family": "numeric", "weight": 600, "use": "primary BPM readout" }
+    }
+  },
+
+  "space": {
+    "unit": 4,
+    "scale": { "1": 4, "2": 8, "3": 12, "4": 16, "5": 20, "6": 24, "7": 32, "8": 40, "9": 48, "10": 64 },
+    "pane-inset": { "value": 20, "use": "default padding inside a pane" },
+    "metric-gap": { "value": 12, "use": "label-to-numeral gap in a metric readout" }
+  },
+
+  "radius": {
+    "sm":   { "value": 4,  "use": "chips, inputs, table row highlight" },
+    "md":   { "value": 7,  "use": "buttons, cards, candidate rows" },
+    "lg":   { "value": 12, "use": "modals, plot wells" },
+    "pill": { "value": 999, "use": "genre-profile chip, relationship chips" }
+  },
+
+  "line": {
+    "hairline": { "value": 1 },
+    "emphasis": { "value": 2, "use": "selected tab underline, splitter grip, plot data pen" },
+    "marker":   { "value": 2, "use": "tempogram primary/felt marker pens (felt is dashed 4-3)" },
+    "focus":    { "width": 1, "offset": 1, "color": "#57C2D6" }
+  },
+
+  "size": {
+    "control-s": { "value": 24, "use": "chips, compact buttons, table filters" },
+    "control-m": { "value": 30, "use": "default buttons, inputs, dropdowns" },
+    "control-l": { "value": 38, "use": "primary actions (Analyze, tiebreak confirm)" },
+    "header":    { "value": 48, "use": "unified chrome/toolbar height (traffic lights inset)" },
+    "statusbar": { "value": 28 },
+    "hit-min":   { "value": 24, "use": "minimum interactive target (desktop pointer)" }
+  },
+
+  "motion": {
+    "instant":       { "ms": 80,  "use": "hover, press feedback" },
+    "fast":          { "ms": 140, "use": "panel slide, verdict swap" },
+    "gentle":        { "ms": 220, "use": "tiebreak panel entrance" },
+    "working-sweep": { "ms": 1200, "use": "single thin sweep during ~1s analysis; loops only while working" },
+    "easing":        { "value": "cubic-bezier(0.2, 0, 0, 1)" },
+    "policy":        "UI fully usable with all motion disabled; nothing meaningful is animation-only"
+  }
+}

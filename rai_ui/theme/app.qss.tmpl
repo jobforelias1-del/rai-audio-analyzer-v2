@@ -1,0 +1,224 @@
+/* app.qss.tmpl — RAI v3 M0 stylesheet template.
+ *
+ * Placeholders are brace-wrapped dotted token paths resolved against
+ * rai_ui/theme/rai.tokens.json by tools/gen_theme.py; an optional
+ * alphaNN modifier (pipe-separated) renders a hex token as rgba at NN%.
+ * Edit THIS file and the tokens, never app.qss.
+ *
+ * Pill rule: Qt QSS silently drops any border-radius larger than half the
+ * box height, so radius.pill (999) is never emitted verbatim. Pill corners
+ * are written as computed radii — a 24px-tall chip gets 12px corners — and
+ * the generator hard-fails on any emitted radius above 24px.
+ *
+ * Scope: M0 widgets only, selected via objectName or dynamic properties.
+ */
+
+/* ---- canvas + base type ------------------------------------------------ */
+
+QMainWindow {
+    background-color: {color.surface.canvas};
+}
+
+QWidget {
+    font-family: "IBM Plex Sans";
+    font-size: {type.scale.body.size}px;
+    color: {color.text.primary};
+}
+
+/* ---- header: unified 48px chrome bar ----------------------------------- */
+
+QWidget#Header {
+    background-color: {color.surface.raised};
+    min-height: {size.header}px;
+    max-height: {size.header}px;
+    border-bottom: {line.hairline}px solid {color.border.hairline};
+}
+
+/* ---- nav rail ----------------------------------------------------------- */
+
+QToolButton[nav="true"] {
+    background-color: transparent;
+    color: {color.text.secondary};
+    border: none;
+    /* reserve the accent bar so checking does not shift the label */
+    border-left: 3px solid transparent;
+    padding: {space.scale.2}px {space.scale.3}px;
+    min-height: {size.hit-min}px;
+}
+
+QToolButton[nav="true"]:hover {
+    background-color: {color.surface.hover};
+    color: {color.text.primary};
+}
+
+QToolButton[nav="true"]:pressed {
+    background-color: {color.surface.active};
+}
+
+QToolButton[nav="true"]:checked {
+    background-color: {color.surface.active};
+    color: {color.accent.base};
+    border-left: 3px solid {color.accent.base};
+}
+
+/* ghost destinations (built but not wired in M0): 38% text opacity —
+   QSS has no widget opacity property, so the dim is carried by the color */
+QToolButton[nav="true"][ghost="true"]:disabled {
+    background-color: transparent;
+    color: {color.text.secondary|alpha38};
+}
+
+/* ---- status bar ---------------------------------------------------------- */
+
+QWidget#StatusBar {
+    background-color: {color.surface.panel};
+    min-height: {size.statusbar}px;
+    max-height: {size.statusbar}px;
+    border-top: {line.hairline}px solid {color.border.hairline};
+}
+
+QLabel[role="status"] {
+    background: transparent;
+    color: {color.text.muted};
+    font-family: "IBM Plex Mono";
+    font-size: {type.scale.caption.size}px;
+}
+
+/* ---- buttons ------------------------------------------------------------- */
+
+QPushButton[variant="primary"] {
+    background-color: {color.accent.base};
+    color: {color.accent.on};
+    border: none;
+    border-radius: {radius.md}px;
+    font-weight: {type.weight.semibold};
+}
+
+QPushButton[variant="primary"]:hover {
+    background-color: {color.accent.hover};
+}
+
+QPushButton[variant="primary"]:pressed {
+    background-color: {color.accent.pressed};
+}
+
+QPushButton[variant="primary"]:disabled {
+    background-color: {color.surface.active};
+    color: {color.text.disabled};
+}
+
+QPushButton[variant="secondary"] {
+    background-color: {color.surface.raised};
+    color: {color.text.primary};
+    border: {line.hairline}px solid {color.border.strong};
+    border-radius: {radius.md}px;
+    font-weight: {type.weight.medium};
+}
+
+QPushButton[variant="secondary"]:hover {
+    background-color: {color.surface.hover};
+}
+
+QPushButton[variant="secondary"]:pressed {
+    background-color: {color.surface.active};
+}
+
+QPushButton[variant="secondary"]:disabled {
+    color: {color.text.disabled};
+    border-color: {color.border.hairline};
+}
+
+QPushButton[variant="ghost"] {
+    background-color: transparent;
+    color: {color.text.secondary};
+    border: none;
+    border-radius: {radius.md}px;
+    font-weight: {type.weight.medium};
+}
+
+QPushButton[variant="ghost"]:hover {
+    background-color: {color.surface.hover};
+    color: {color.text.primary};
+}
+
+QPushButton[variant="ghost"]:pressed {
+    background-color: {color.surface.active};
+}
+
+QPushButton[variant="ghost"]:disabled {
+    color: {color.text.disabled};
+}
+
+/* control heights are content-box, so vertical padding stays 0 */
+
+QPushButton[size="s"] {
+    min-height: {size.control-s}px;
+    max-height: {size.control-s}px;
+    padding: 0 {space.scale.3}px;
+    font-size: {type.scale.label.size}px;
+}
+
+QPushButton[size="m"] {
+    min-height: {size.control-m}px;
+    max-height: {size.control-m}px;
+    padding: 0 {space.scale.4}px;
+    font-size: {type.scale.body.size}px;
+}
+
+QPushButton[size="l"] {
+    min-height: {size.control-l}px;
+    max-height: {size.control-l}px;
+    padding: 0 {space.scale.5}px;
+    font-size: {type.scale.body-lg.size}px;
+}
+
+/* ---- chip (pill) --------------------------------------------------------- */
+
+QLabel[role="chip"] {
+    background-color: {color.surface.raised};
+    color: {color.text.secondary};
+    border: {line.hairline}px solid {color.border.strong};
+    /* pill on a 24px-tall chip: computed radius = height / 2 (see header) */
+    border-radius: 12px;
+    min-height: {size.control-s}px;
+    max-height: {size.control-s}px;
+    padding: 0 {space.scale.3}px;
+    font-size: {type.scale.label.size}px;
+    font-weight: {type.weight.medium};
+}
+
+/* ---- report view ---------------------------------------------------------- */
+
+QTextEdit[role="report"] {
+    background-color: {color.surface.inset};
+    color: {color.text.primary};
+    font-family: "IBM Plex Mono";
+    font-size: {type.scale.body.size}px;
+    border: {line.hairline}px solid {color.border.hairline};
+    border-radius: {radius.lg}px;
+    padding: {space.scale.3}px;
+    selection-background-color: {color.accent.bg};
+    selection-color: {color.text.primary};
+}
+
+/* ---- empty state ----------------------------------------------------------- */
+
+QLabel[role="empty-title"] {
+    background: transparent;
+    color: {color.text.secondary};
+    font-size: {type.scale.body-lg.size}px;
+}
+
+QLabel[role="empty-hint"] {
+    background: transparent;
+    color: {color.text.muted};
+    font-size: {type.scale.body.size}px;
+}
+
+/* ---- toast ------------------------------------------------------------------ */
+
+QFrame[role="toast"] {
+    background-color: {color.surface.overlay};
+    border: {line.hairline}px solid {color.border.hairline};
+    border-radius: {radius.md}px;
+}
