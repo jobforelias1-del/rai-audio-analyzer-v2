@@ -6,11 +6,15 @@ nothing here touches window chrome.
 
 The file chip has two states: a dashed "no file loaded" placeholder before the
 first analysis, and ``name  duration · sr · channels`` after (values straight
-off the AnalysisResult). The genre chip is static (profile switching is a
-later milestone). The rail toggle is live as of M1: it requests the
-rail⇄bridge swap (MainWindow owns the mode and its QSettings persistence —
-ruling R10) and ``set_rail_collapsed`` keeps its tooltip honest about which
-way the next click goes.
+off the AnalysisResult). The genre chip is clickable as of M3 (R-M3-11): it
+emits ``profile_chip_clicked`` and MainWindow opens the profile popover on it
+(profile source, confirmed-truth count, the relearn/revert actions). The
+chip's TEXT stays the static ``DRILL · 140–170`` — profile *switching* is
+still a later milestone; the popover is about the drill profile's provenance.
+The rail toggle is live as of M1: it requests the rail⇄bridge swap
+(MainWindow owns the mode and its QSettings persistence — ruling R10) and
+``set_rail_collapsed`` keeps its tooltip honest about which way the next
+click goes.
 """
 
 from __future__ import annotations
@@ -41,10 +45,30 @@ def format_file_meta(duration: float, sr: int, channels: int) -> str:
     return f"{duration:.1f} s · {sr / 1000:.4g} kHz · {_channels_word(channels)}"
 
 
+class _GenreChip(QLabel):
+    """The genre chip as a click target (M3, R-M3-11).
+
+    A QLabel because the theme QSS skins ``QLabel[role="chip"]``; the click
+    surface is the whole pill. Left-press emits ``clicked`` — the popover
+    open/close choreography is the shell's job.
+    """
+
+    clicked = Signal()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 — Qt naming
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
 class HeaderBar(QFrame):
-    """Top chrome row. Emits ``browse_requested`` when Browse… is clicked."""
+    """Top chrome row. Emits ``browse_requested`` when Browse… is clicked and
+    ``profile_chip_clicked`` when the genre chip is (R-M3-11)."""
 
     browse_requested = Signal()
+    profile_chip_clicked = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -104,14 +128,17 @@ class HeaderBar(QFrame):
 
         # Genre profile chip (pill, QLabel[role="chip"] in the theme QSS).
         # The amber dot is a marker color, not a verdict color — it identifies
-        # the profile, it judges nothing.
-        self.genre_chip = QLabel(self)
+        # the profile, it judges nothing. Clickable as of M3 (R-M3-11): it
+        # opens the profile popover, so it carries the pointing-hand cursor.
+        self.genre_chip = _GenreChip(self)
         self.genre_chip.setProperty("role", "chip")
         self.genre_chip.setTextFormat(Qt.TextFormat.RichText)
         self.genre_chip.setText(
             f'<span style="color: {token("color.semantic.marker-primary.base")};">●</span>'
             f"&nbsp;{GENRE_CHIP_TEXT}"
         )
+        self.genre_chip.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.genre_chip.clicked.connect(self.profile_chip_clicked.emit)
         layout.addWidget(self.genre_chip)
 
         self.browse_button = QPushButton("Browse…", self)

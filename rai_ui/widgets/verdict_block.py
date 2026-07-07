@@ -19,8 +19,8 @@ Doctrine enforced here:
 * Reason lines render in full here (the rail has room); the meter bridge owns
   the one-line-ellipsized treatment.
 * The red "Open tiebreak" action exists ONLY inside the ambiguous state
-  (C-10); "undo" is an inline accent link on the confirmed card. Both are
-  live-looking in M1 — wiring them to toasts is the shell's job (R6).
+  (C-10); "undo" is an inline accent link on the confirmed card. As of M3
+  both are live: the shell opens the C-14 overlay / calls ``session.undo()``.
 * The Working card's 2px sweep is decorative motion: it stops whenever the
   widget is hidden and the card is fully readable with the animation off.
 """
@@ -342,6 +342,12 @@ class VerdictBlock(QFrame):
 
         for label in self._reason_labels:
             self._reasons_layout.removeWidget(label)
+            # Hide BEFORE deleteLater: a removed-but-parented widget keeps
+            # painting at its old geometry until the deferred delete runs, so
+            # a confirm/undo transition would ghost the previous verdict's
+            # reason lines under the new ones for a frame (visible in any
+            # same-cycle grab — caught by the M3 preview shots).
+            label.hide()
             label.deleteLater()
         self._reason_labels = []
         for reason in view.reasons:

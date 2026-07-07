@@ -47,7 +47,9 @@ def _passing_report() -> dict:
 
 def test_required_keys_pin_the_strengthened_contract():
     """The contract itself is load-bearing: dropping a key here would quietly
-    reopen the write-only hole, so the set is pinned verbatim."""
+    reopen the write-only hole, so the set is pinned verbatim. ``truth_ok``
+    joined in M3 (R-M3-14) — the ground-truth lane degrades to logged no-ops
+    by design, so only the exit code catches its silent death."""
     assert REQUIRED_TRUE_KEYS == (
         "window_shown",
         "accepts_drops",
@@ -55,6 +57,7 @@ def test_required_keys_pin_the_strengthened_contract():
         "analysis_ok",
         "tempo_ok",
         "signal_ok",
+        "truth_ok",
     )
 
 
@@ -144,6 +147,83 @@ def test_probe_fails_when_metrics_layer_dies(tmp_path, monkeypatch):
     assert report["analysis_ok"] is True
     assert report["dnd_delivered"] is True
     assert report["tempo_ok"] is True
+    # ... and the M3 truth lane is independent of the metrics lane ...
+    assert report["truth_ok"] is True
     # ... but the Signal section rendered absence, and THAT fails the probe.
     assert report["signal_ok"] is False
+    assert exit_code == EXIT_FAILED
+
+
+# ---------------------------------------------------------------------------
+# M3 truth_ok: healthy round-trip + failure direction (landmine 14)
+# ---------------------------------------------------------------------------
+
+
+def _run_real_probe(tmp_path, monkeypatch, json_name="smoke_report.json"):
+    """Shared real-probe driver (the metrics-death test's setup, factored)."""
+    pytest.importorskip("PySide6")
+    pytest.importorskip("soundfile")
+
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+
+    import rai_ui.app as app_module
+    from rai_ui.services import recent_files
+    from rai_ui.smoke import run_smoke
+
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(app_module, "create_app", lambda argv=None: app)
+    monkeypatch.setattr(
+        recent_files,
+        "_settings",
+        lambda: QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat),
+    )
+
+    json_path = tmp_path / json_name
+    args = types.SimpleNamespace(smoke_json=str(json_path), smoke_audio=False)
+    exit_code = run_smoke(args)
+    return exit_code, json.loads(json_path.read_text(encoding="utf-8"))
+
+
+def test_probe_truth_roundtrip_passes_and_restores_store_factory(
+    tmp_path, monkeypatch
+):
+    """Healthy probe: the posed confirm/undo round-trip passes against the
+    probe's own isolated temp store, the probe exits 0, and the store
+    directory factory is restored afterwards (the probe may run inside a
+    test process — a leaked redirect would silently re-point later store
+    users at a deleted temp dir)."""
+    pytest.importorskip("PySide6")
+    from rai_ui.services import ground_truth_store
+
+    factory_before = ground_truth_store._store_dir
+    exit_code, report = _run_real_probe(tmp_path, monkeypatch)
+
+    assert report["truth_ok"] is True, report.get("truth_error")
+    assert exit_code == EXIT_OK
+    # Exception-safe restore, and the probe's journal never landed in the
+    # ambient (test-isolated) store dir.
+    assert ground_truth_store._store_dir is factory_before
+    import os
+
+    assert not os.path.exists(ground_truth_store.journal_path())
+
+
+def test_probe_fails_when_truth_lane_dies(tmp_path, monkeypatch):
+    """Failure direction (landmine 14): kill the store lookup so the posed
+    confirm can never round-trip — the analysis stays green, but truth_ok
+    must fail the probe. Without truth_ok in REQUIRED_TRUE_KEYS this exact
+    death would ship exit 0."""
+    pytest.importorskip("PySide6")
+    from rai_ui.services import ground_truth_store
+
+    monkeypatch.setattr(ground_truth_store, "lookup", lambda md5: None)
+
+    exit_code, report = _run_real_probe(tmp_path, monkeypatch)
+
+    assert report["analysis_ok"] is True
+    assert report["tempo_ok"] is True
+    assert report["signal_ok"] is True
+    assert report["truth_ok"] is False
+    assert report["truth_error"]["store_write_roundtrip"] is False
     assert exit_code == EXIT_FAILED

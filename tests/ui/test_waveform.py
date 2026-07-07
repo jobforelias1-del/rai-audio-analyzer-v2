@@ -152,6 +152,21 @@ def test_waveform_pen_is_the_v013_token_at_1_2px(pane):
         assert pen.isCosmetic()
 
 
+def test_envelope_and_spine_antialias_off(pane):
+    # R-M3-15 (the Overview first-click lag, Elias-flagged at M2 acceptance):
+    # antialiased stroking of the 1.2px pen is Qt's raster cliff — ~167 ms
+    # per paint; per-item AA off is ~2 ms and flips pyqtgraph to its fast
+    # drawLines path. CI-stable proxy: assert the FLAG, not milliseconds.
+    pane.set_view(make_audio_vm())
+    for item in (pane._envelope, pane._spine):
+        assert item.opts["antialias"] is False
+        # The flag must actually reach the painted PlotCurveItem — that is
+        # the object whose paint() chooses the fast path.
+        assert item.curve.opts["antialias"] is False
+        # And the fix must NOT have touched the approved 1.2px width literal.
+        assert item.opts["pen"].widthF() == pytest.approx(1.2)
+
+
 def test_ranges_locked_and_mouse_disabled(pane):
     pane.set_view(make_audio_vm())
     viewbox = pane._plot.getPlotItem().getViewBox()

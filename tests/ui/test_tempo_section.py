@@ -10,8 +10,10 @@ REAL session/reducer — the same drive path tests/ui/test_shell.py uses):
   chrome, hidden on the hero page, persistent across sections (R10).
 * The header toggle swaps rail ⇄ bridge, updates its tooltip, persists the
   choice via QSettings, and the numbers survive the swap.
-* Every M3-seam action (hear / tiebreak / undo) answers with the R6 toast —
-  present-but-inert, never a dead click.
+* Every flagship action wires to the real flow as of M3: tiebreak entry
+  points open the C-14 overlay (ambiguous only), ▶ hear fires the verbatim
+  design toast + the click service, undo reverts through session.undo() —
+  never a dead click, and never a toast for a transition that didn't happen.
 * Working, no-tempo, and error states render on all surfaces.
 
 Qt-dependent throughout — PySide6/pytest-qt are importorskip'd before any Qt
@@ -199,51 +201,96 @@ def test_working_state_toggles_sweep_skeleton_and_verdict(window, qtbot):
 
 
 # ---------------------------------------------------------------------------
-# M3 seams → R6 toasts (never a dead click)
+# M3 flagship wiring (the R6 inert toasts are gone — real flows, never a
+# dead click; the full arcs live in tests/ui/test_flagship_end_to_end.py)
 # ---------------------------------------------------------------------------
 
 
-def test_rail_tiebreak_button_click_toasts_r6_copy(window, qtbot):
+def test_rail_tiebreak_button_click_opens_overlay(window, qtbot):
     window.show()
     result = make_result(make_tempo(ambiguous=True, ambiguity_reason=AMBIGUOUS_REASON))
     finish_analysis(qtbot, window, result=result)
 
     button = window.rail.verdict_block._tiebreak_button
-    assert button.isVisible()  # live-looking, never disabled-greyed (R6)
+    assert button.isVisible()
+    assert not window.tempo_section.candidates.tiebreak.isVisible()
     button.click()
-    assert window.toast.isVisible()
-    assert window.toast.label.text() == "Tiebreak flow arrives in M3"
+    # The overlay opened over the candidates pane and the shell landed on
+    # Tempo (the rail button is reachable from any section).
+    assert window.stack.currentIndex() == TEMPO_PAGE
+    assert window.tempo_section.candidates.tiebreak.isVisible()
 
 
-def test_candidates_header_and_bridge_tiebreak_toast(window, qtbot):
+def test_candidates_header_and_bridge_tiebreak_open_overlay(window, qtbot):
     window.show()
     result = make_result(make_tempo(ambiguous=True, ambiguity_reason=AMBIGUOUS_REASON))
     finish_analysis(qtbot, window, result=result)
+    overlay = window.tempo_section.candidates.tiebreak
 
     window.tempo_section.candidates.tiebreak_button.click()
-    assert window.toast.label.text() == "Tiebreak flow arrives in M3"
+    assert overlay.isVisible()
+    overlay.dismiss()
+    assert not overlay.isVisible()
 
     window.header.rail_toggle.click()  # bridge mode
     window.bridge._tiebreak_button.click()
-    assert window.toast.label.text() == "Tiebreak flow arrives in M3"
+    assert overlay.isVisible()
 
 
-def test_hear_requested_toasts_r6_copy(window, qtbot):
+def test_tiebreak_entry_is_ambiguous_only(window, qtbot):
+    # R-M3-6: a confident verdict has NO tiebreak entry point — a stray
+    # signal (stale click racing a state change) must not raise the overlay.
+    window.show()
+    finish_analysis(qtbot, window)  # confident
+    window.rail.tiebreak_requested.emit()
+    assert not window.tempo_section.candidates.tiebreak.isVisible()
+
+
+def test_hear_requested_fires_design_toast_and_click_service(window, qtbot):
     window.show()
     finish_analysis(qtbot, window)
+    calls = []
+    window.click_preview = type(
+        "FakePreview",
+        (),
+        {
+            "preview": lambda self, bpm: calls.append(float(bpm)),
+            "stop": lambda self: None,
+            "clear": lambda self: None,
+            "set_source": lambda self, features, signal_obj: None,
+        },
+    )()
     # The cell-click → hear_requested path is covered by the table's own
-    # tests; here the wiring from the section signal to the toast is what's
-    # under test.
+    # tests; here the wiring from the section signal to the toast + click
+    # service is what's under test (R-M3-10: the clicked ROW's bpm).
     window.tempo_section.candidates.hear_requested.emit(205.15)
     assert window.toast.isVisible()
-    assert window.toast.label.text() == "Audio preview arrives in M3"
+    assert (
+        window.toast.label.text()
+        == "▶ click-grid preview · 205.15 BPM — audible in the app"
+    )
+    assert calls == [205.15]
 
 
-def test_undo_requested_routes_to_tiebreak_toast(window, qtbot):
+def test_undo_reverts_confirmation_and_toasts(window, qtbot):
     window.show()
-    finish_analysis(qtbot, window)
+    result = make_result(make_tempo(ambiguous=True, ambiguity_reason=AMBIGUOUS_REASON))
+    finish_analysis(qtbot, window, result=result)
+    window.session.confirm(155.25)
+    assert window.rail.verdict_block.view().kind == "confirmed_human"
+
     window.rail.undo_requested.emit()
-    assert window.toast.label.text() == "Tiebreak flow arrives in M3"
+    assert window.toast.label.text() == "Reverted — verdict back to AMBIGUOUS"
+    assert window.rail.verdict_block.view().kind == "ambiguous"
+
+
+def test_undo_without_confirmation_is_a_silent_no_op(window, qtbot):
+    # The reducer's guard is the truth: no transition, no "Reverted" toast.
+    window.show()
+    finish_analysis(qtbot, window)  # confident — nothing to undo
+    window.rail.undo_requested.emit()
+    assert not window.toast.isVisible()
+    assert window.rail.verdict_block.view().kind == "confident"
 
 
 # ---------------------------------------------------------------------------

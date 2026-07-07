@@ -4,6 +4,12 @@ Left side is one mono line: engine version · analysis time · profile · the
 privacy statement. It re-renders from stored state (working flag, seconds,
 failure note) so signal ordering upstream can't leave it stale. Right side
 reports drag-drop capability, decided once at startup.
+
+M3 (R-M3-11): a relearn run reports its progress here — ``set_relearn_
+progress`` slots a transient ``relearning {done}/{total}`` segment into the
+line while the worker grinds through the confirmed files, and clears it on
+completion/failure (the toast carries the outcome). Same stored-state
+re-render discipline as everything else on the strip.
 """
 
 from __future__ import annotations
@@ -37,6 +43,7 @@ class StatusBar(QFrame):
         self._working = False
         self._failed = False
         self._seconds: Optional[float] = None
+        self._relearn_note: Optional[str] = None  # e.g. "relearning 2/3" (M3)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(int(token("space.scale.3")), 0, int(token("space.scale.3")), 0)
@@ -76,6 +83,11 @@ class StatusBar(QFrame):
     def set_dnd(self, available: bool) -> None:
         self.right_label.setText(DND_READY if available else DND_UNAVAILABLE)
 
+    def set_relearn_progress(self, note: Optional[str]) -> None:
+        """Show (or clear, with ``None``) the transient relearn segment."""
+        self._relearn_note = note
+        self._render()
+
     def _render(self) -> None:
         if self._working:
             middle = WORKING_SEGMENT
@@ -85,6 +97,8 @@ class StatusBar(QFrame):
             middle = f"analysis {self._seconds:.1f} s"
         else:
             middle = NO_TIME_SEGMENT
-        self.left_label.setText(
-            " · ".join((ENGINE_SEGMENT, middle, PROFILE_SEGMENT, PRIVACY_SEGMENT))
-        )
+        segments = [ENGINE_SEGMENT, middle]
+        if self._relearn_note:
+            segments.append(self._relearn_note)
+        segments += [PROFILE_SEGMENT, PRIVACY_SEGMENT]
+        self.left_label.setText(" · ".join(segments))

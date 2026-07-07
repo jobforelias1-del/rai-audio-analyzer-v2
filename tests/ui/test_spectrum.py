@@ -39,9 +39,11 @@ from rai_ui.plots.spectrum import (
     GRID_FRACS,
     PANE_CAPTION,
     PANE_TITLE,
+    SPECTRUM_MAX_POINTS,
     Y_VIEW_BOTTOM_DB,
     Y_VIEW_TOP_DB,
     SpectrumPane,
+    decimate_curve,
     log_x_fraction,
 )
 from rai_ui.state.signal_view import (
@@ -202,6 +204,83 @@ def test_curve_max_sits_at_zero_db_top(pane):
     assert float(y.max()) == pytest.approx(SPECTRUM_TOP_DB)
     assert float(y.min()) >= SPECTRUM_FLOOR_DB
     assert Y_VIEW_TOP_DB >= SPECTRUM_TOP_DB  # headroom: the peak never clips
+
+
+# ---------------------------------------------------------------------------
+# R-M3-15 display decimation — point ceiling, extremes contained, AA kept
+# ---------------------------------------------------------------------------
+
+
+def test_decimate_curve_passthrough_at_or_below_ceiling():
+    x = np.linspace(0.0, 1.0, SPECTRUM_MAX_POINTS)
+    y = np.sin(x * 40.0)
+    got_x, got_y = decimate_curve(x, y)
+    np.testing.assert_array_equal(got_x, x)
+    np.testing.assert_array_equal(got_y, y)
+
+
+def test_decimate_curve_caps_points_and_contains_every_extreme():
+    rng = np.random.default_rng(11)
+    n = 8178  # the recon-measured real-file Welch grid size
+    x = np.linspace(0.0, 1.0, n)
+    y = rng.uniform(-90.0, 0.0, n)
+    # Plant a single-bin spike and a single-bin notch mid-curve: min/max
+    # decimation exists exactly so these never vanish from the display.
+    y[5000] = 3.0
+    y[2222] = -120.0
+    got_x, got_y = decimate_curve(x, y)
+    assert got_x.size == got_y.size <= SPECTRUM_MAX_POINTS
+    assert float(got_y.max()) == pytest.approx(3.0)
+    assert float(got_y.min()) == pytest.approx(-120.0)
+    # x endpoints exact, x monotone non-decreasing (a drawable polyline).
+    assert got_x[0] == pytest.approx(x[0])
+    assert got_x[-1] == pytest.approx(x[-1])
+    assert np.all(np.diff(got_x) >= 0.0)
+    # Every drawn y is a value the data actually contains — the decimated
+    # curve never fabricates a level (minmax doctrine, decimate.py).
+    assert np.isin(got_y, y).all()
+
+
+def test_dense_curve_draws_capped_but_view_model_stays_full_res(pane):
+    vm = populated_vm(spectrum=make_spectrum(n=8178))
+    pane.set_view(vm)
+    x, y = pane._curve.getData()
+    assert x.size <= SPECTRUM_MAX_POINTS  # R-M3-15 ceiling on DRAWN points
+    assert len(vm.spectrum_db) == 8178  # display-only: the truth is untouched
+    # Normalization survives decimation: the max is an extreme, so the drawn
+    # peak still kisses the 0 dB top exactly.
+    assert float(y.max()) == pytest.approx(SPECTRUM_TOP_DB)
+    assert float(y.min()) >= SPECTRUM_FLOOR_DB
+
+
+def test_small_curve_renders_exact_data(pane):
+    # Below the ceiling nothing is decimated — the existing exact-equality
+    # contract (test_curve_renders_normalized_view_model) holds verbatim.
+    vm = populated_vm(spectrum=make_spectrum(n=512))
+    pane.set_view(vm)
+    x, y = pane._curve.getData()
+    np.testing.assert_allclose(x, np.log10(vm.spectrum_freqs))
+    np.testing.assert_allclose(y, vm.spectrum_db)
+
+
+def test_spectrum_curve_keeps_antialiasing(qtbot):
+    # R-M3-15 draws the line here: the spectrum curve is DIAGONAL — item-level
+    # AA-off (the waveform fix) would visibly stair-step it. The curve must
+    # keep INHERITING the config option (create_app sets antialias=True,
+    # app.py — bare test QApplications default it to False, so flip it for
+    # the construction under test and prove the inheritance).
+    import pyqtgraph as pg
+
+    previous = pg.getConfigOption("antialias")
+    pg.setConfigOptions(antialias=True)
+    try:
+        widget = SpectrumPane()
+        qtbot.addWidget(widget)
+        widget.set_view(populated_vm(spectrum=make_spectrum(n=8178)))
+        assert widget._curve.opts["antialias"] is True
+        assert widget._curve.curve.opts["antialias"] is True
+    finally:
+        pg.setConfigOptions(antialias=previous)
 
 
 # ---------------------------------------------------------------------------

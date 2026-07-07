@@ -21,12 +21,21 @@ Shots, in order:
                      metric cards)
     09-signal-silence  the Signal section on the silent WAV (−∞ vs — + chips,
                      R-M2-8 spectrum copy)
+    10-tiebreak-overlay  the C-14 tiebreak overlay open over the candidates
+                     pane with the top-ranked card selected (the drill
+                     fixture is honestly ambiguous, so the entry point is
+                     the real header button)
+    11-confirmed     CONFIRMED · HUMAN everywhere after a REAL confirm through
+                     the overlay's own button (green rail verdict, ✓ HUMAN
+                     row, moved tempogram marker) — journaled to the ISOLATED
+                     temp store only
     gate-<fixture>   one Tempo shot per acceptance-gate WAV present on disk
                      (validation/ground_truth.py paths; the WAVs are
                      .gitignored so this is existence-guarded)
 
-Settings are redirected to a throwaway temp INI so the harness never touches
-the user's real recents or rail preference.
+Settings are redirected to a throwaway temp INI and the M3 ground-truth
+store to a throwaway temp dir, so the harness never touches the user's real
+recents, rail preference, or ground-truth journal/fingerprint.
 
 Usage:
     QT_QPA_PLATFORM=offscreen .venv-v3/bin/python tools/preview_shots.py OUTDIR
@@ -56,11 +65,19 @@ SILENT_SR = 44_100
 
 
 def _isolate_settings() -> None:
-    """Point recent-files and UI prefs at a throwaway INI (never the user's)."""
+    """Point every per-user store at throwaway temp locations (never the user's).
+
+    QSettings (recents + rail preference) go to a temp INI; the M3
+    ground-truth store directory factory (R-M3-2) goes to a temp dir — the
+    harness runs REAL analyses, whose workers look up the user fingerprint
+    and whose session completions look up stored truth, and touching the real
+    ``~/Library/Application Support/RAI Audio Analyzer/`` from a harness is a
+    defect. The process is throwaway, so nothing is restored.
+    """
     from PySide6.QtCore import QSettings
 
     import rai_ui.main_window as mw
-    from rai_ui.services import recent_files
+    from rai_ui.services import ground_truth_store, recent_files
 
     ini_dir = tempfile.mkdtemp(prefix="rai_preview_settings_")
 
@@ -71,6 +88,9 @@ def _isolate_settings() -> None:
 
     recent_files._settings = _tmp_settings("recent.ini")
     mw._ui_settings = _tmp_settings("ui.ini")
+
+    store_dir = tempfile.mkdtemp(prefix="rai_preview_store_")
+    ground_truth_store._store_dir = lambda: store_dir
 
 
 def _write_silent_wav() -> str:
@@ -191,6 +211,34 @@ def main(argv: list[str]) -> int:
         _run_analysis(app, window, silent_wav)
         window.nav.set_current("Signal")
         shot("09-signal-silence")
+
+        # M3 appends (same append-only rule): the tiebreak overlay and the
+        # confirmed state, driven through the REAL entry points — the drill
+        # fixture is honestly ambiguous (raw-peak vs prior octave disagreement),
+        # so the header "Open tiebreak" button is live.
+        _run_analysis(app, window, drill_wav)
+        window.nav.set_current("Tempo")
+        pane = window.tempo_section.candidates
+        pane.tiebreak_button.click()  # -> MainWindow opens the overlay (R-M3-6)
+        overlay = pane.tiebreak
+        # Posed-state trick (the 02-working precedent): the 220ms raiIn
+        # entrance is decorative — stop it and render the settled overlay so
+        # the grab isn't caught mid-fade.
+        overlay._entrance.stop()
+        overlay._effect.setOpacity(1.0)
+        overlay.move(overlay._target_pos)
+        # Select the SECOND-ranked card (the 04 demo's own scenario confirms a
+        # non-primary): shot 11 then proves the R-M3-4 display recompute —
+        # the ✓ HUMAN pill, raised row, and tempogram marker all move OFF the
+        # engine primary.
+        overlay.cards[1].clicked.emit()
+        shot("10-tiebreak-overlay")
+
+        # A REAL confirm through the overlay button: session.confirm ->
+        # journal append (isolated temp store) -> CONFIRMED · HUMAN fan-out.
+        overlay.confirm_button.click()
+        window.toast.hide()  # the 2.4 s toast would cover the rail's rows
+        shot("11-confirmed")
 
         # Acceptance-gate fixtures, if the producer has them on disk.
         from validation.ground_truth import available_tracks

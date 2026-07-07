@@ -14,9 +14,12 @@ verbatim to both panes and never touches engine objects itself.
 ``set_working`` mirrors the session's working flag onto the C-17 surfaces
 (sweep overlay on the plot, skeleton rows in the table).
 
-The child panes' M3-seam actions bubble up here (``hear_requested`` /
-``tiebreak_requested``) and are answered by MainWindow with the R6
-"arrives in M3" toasts — present-but-inert, never a dead click.
+The child panes' actions bubble up here for MainWindow to answer:
+``hear_requested`` / ``tiebreak_requested`` / ``undo_requested`` plus the
+tiebreak overlay's ``preview_requested`` / ``preview_stop_requested`` /
+``confirm_requested`` (M3 — the overlay lives inside the candidates pane;
+MainWindow opens it via ``open_tiebreak`` on ambiguous verdicts only and
+wires the preview signals to the click-preview service).
 """
 
 from __future__ import annotations
@@ -44,6 +47,12 @@ class TempoSection(QWidget):
 
     hear_requested = Signal(float)  # bpm of the clicked candidate row
     tiebreak_requested = Signal()
+    undo_requested = Signal()  # candidates-header "Undo tiebreak" ghost (R-M3-17)
+    # Tiebreak-overlay signals (M3): bpm previews + the confirm act.
+    preview_requested = Signal(float)
+    preview_stop_requested = Signal()
+    confirm_requested = Signal(float)
+    tiebreak_closed = Signal()  # ✕/Esc/auto-dismiss — MainWindow stops audio
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -65,6 +74,11 @@ class TempoSection(QWidget):
         # landmine does not apply to child-widget wiring).
         self.candidates.hear_requested.connect(self.hear_requested)
         self.candidates.tiebreak_requested.connect(self.tiebreak_requested)
+        self.candidates.undo_requested.connect(self.undo_requested)
+        self.candidates.preview_requested.connect(self.preview_requested)
+        self.candidates.preview_stop_requested.connect(self.preview_stop_requested)
+        self.candidates.confirm_requested.connect(self.confirm_requested)
+        self.candidates.tiebreak_closed.connect(self.tiebreak_closed)
 
     # -- public API (widget contract) ------------------------------------------
 
@@ -78,6 +92,15 @@ class TempoSection(QWidget):
         """Toggle the C-17 working surfaces (plot sweep + table skeleton)."""
         self.tempogram.set_working(active)
         self.candidates.set_working(active)
+
+    def open_tiebreak(self) -> None:
+        """Open the C-14 overlay over the candidates pane (ambiguous only —
+        the caller enforces R-M3-6; confirmed state has no entry point)."""
+        self.candidates.open_tiebreak()
+
+    def close_tiebreak(self) -> None:
+        """Dismiss the overlay if open (preview stops, selection survives)."""
+        self.candidates.close_tiebreak()
 
     def view(self) -> TempoViewModel:
         """The last-rendered view-model (smoke/test introspection hook)."""

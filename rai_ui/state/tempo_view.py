@@ -26,6 +26,11 @@ Doctrine enforced here (so the widgets cannot get it wrong):
   and belong to the widgets; ``VerdictView.word`` carries the bare word.
 * No-tempo is a neutral state, never error styling (ruling R14): copy is the
   computed ``no periodicity — {sub}`` form.
+* CONFIRMED · HUMAN is a display overlay (R-M3-4 / plan D7): the confirmed
+  bpm from ``verdict_state.confirmed_bpm`` becomes the effective primary for
+  chips, markers, and the readout — recomputed HERE with pure formatter math
+  over the UNTOUCHED engine result. Felt stays the engine value (04
+  executable truth over wireframe F4); only its relation chip recomputes.
 
 Pure Python + numpy only: PySide6/pyqtgraph imports are FORBIDDEN here so the
 module is unit-testable headless and collectable by the Qt-less engine CI
@@ -118,7 +123,7 @@ class CandidateRowView:
     score_text: str  # 2dp
     chip: ChipView
     is_primary: bool
-    confirmed_human: bool  # always False in M1 (surface exists for M3)
+    confirmed_human: bool  # True on the confirmed row (M3) — the HumanPill row
 
 
 @dataclass(frozen=True)
@@ -215,13 +220,32 @@ def _felt_chip(felt_bpm: float, primary_bpm: float) -> ChipView:
     return ChipView(text=text, kind=kind)
 
 
-def _candidate_rows(tempo) -> tuple[CandidateRowView, ...]:
-    primary_bpm = tempo.primary_bpm
+# The 04 demo's confirmed-row detector: |candidate − confirmed| < 0.01
+# (Console CO:737). The confirmed bpm comes from a tiebreak card, i.e. one of
+# the ranked candidates, so a real confirmation always matches a row.
+_CONFIRMED_ROW_TOL = 0.01
+
+
+def _candidate_rows(tempo, confirmed_bpm: Optional[float] = None) -> tuple[CandidateRowView, ...]:
+    """Candidate rows; with a confirmed bpm the display recomputes (R-M3-4).
+
+    Confirmed state is a VIEW-layer overlay over the untouched engine result
+    (D7): the confirmed bpm becomes the effective primary — every chip is
+    recomputed against it (pure formatter math), the raised/amber primary
+    styling and the ✓ HUMAN pill move to the confirmed row, and the engine's
+    original primary row renders like any other relation of the new primary.
+    """
+    effective_primary = confirmed_bpm if confirmed_bpm is not None else tempo.primary_bpm
     rows = []
     for i, c in enumerate(tempo.candidates):
         # Ranked, primary first, is the resolver's ordering guarantee;
         # non-primary rows keep their coarse 0.25-grid BPMs (ruling R5).
-        is_primary = i == 0
+        if confirmed_bpm is None:
+            is_primary = i == 0
+            confirmed_human = False
+        else:
+            is_primary = abs(float(c.bpm) - confirmed_bpm) < _CONFIRMED_ROW_TOL
+            confirmed_human = is_primary  # 04:737 — human pill on the confirmed row only
         salience = min(1.0, max(0.0, float(c.salience)))  # defensive clamp for the bar
         rows.append(
             CandidateRowView(
@@ -230,21 +254,24 @@ def _candidate_rows(tempo) -> tuple[CandidateRowView, ...]:
                 salience=salience,
                 salience_text=f"{salience:.3f}",
                 score_text=f"{float(c.score):.2f}",
-                chip=_row_chip(c.bpm, primary_bpm, is_primary),
+                chip=_row_chip(c.bpm, effective_primary, is_primary),
                 is_primary=is_primary,
-                confirmed_human=False,  # M3 wires human confirmation
+                confirmed_human=confirmed_human,
             )
         )
     return tuple(rows)
 
 
-def _markers(tempo) -> tuple[MarkerView, ...]:
+def _markers(tempo, confirmed_bpm: Optional[float] = None) -> tuple[MarkerView, ...]:
+    # R-M3-4: the tempogram's primary marker moves to the confirmed bpm; the
+    # felt marker stays at the ENGINE's felt value (04 executable truth).
+    primary_bpm = confirmed_bpm if confirmed_bpm is not None else tempo.primary_bpm
     markers = [
         MarkerView(
-            bpm=float(tempo.primary_bpm),
+            bpm=float(primary_bpm),
             kind="primary",
-            label=f"{fmt_bpm(tempo.primary_bpm)} · PRIMARY",
-            side=marker_label_side(tempo.primary_bpm, BPM_AXIS_MIN, BPM_AXIS_MAX),
+            label=f"{fmt_bpm(primary_bpm)} · PRIMARY",
+            side=marker_label_side(primary_bpm, BPM_AXIS_MIN, BPM_AXIS_MAX),
         )
     ]
     if tempo.felt_bpm is not None:
@@ -328,10 +355,21 @@ def _verdict_view(verdict_state: VerdictState, result) -> VerdictView:
     )
 
 
-def _readout(verdict_view: VerdictView, result, has_tempo: bool, signal_result) -> ReadoutView:
+def _readout(
+    verdict_view: VerdictView,
+    result,
+    has_tempo: bool,
+    signal_result,
+    confirmed_bpm: Optional[float] = None,
+) -> ReadoutView:
     tempo = getattr(result, "tempo", None)
     primary = tempo.primary_bpm if (tempo is not None and has_tempo) else None
     felt = tempo.felt_bpm if (tempo is not None and has_tempo) else None
+    if confirmed_bpm is not None and primary is not None:
+        # R-M3-4: the confirmed bpm is the readout's primary; FELT stays the
+        # engine measurement, but its relation chip recomputes against the
+        # new primary (04:850) — pure formatter math, engine untouched.
+        primary = confirmed_bpm
 
     loudness = getattr(result, "loudness", None)
 
@@ -391,6 +429,17 @@ def build_tempo_view(
         features = None
         signal_result = None
 
+    # M3 confirmed overlay (R-M3-4): only a CONFIRMED · HUMAN verdict carries
+    # an effective confirmed bpm into the display math — a stale
+    # ``confirmed_bpm`` on a hand-built state of any other kind is inert, and
+    # the WORKING/ERROR blank above already nulled the payload it would need.
+    confirmed_bpm: Optional[float] = None
+    if (
+        verdict_state.kind is VerdictKind.CONFIRMED_HUMAN
+        and verdict_state.confirmed_bpm is not None
+    ):
+        confirmed_bpm = float(verdict_state.confirmed_bpm)
+
     tempo = getattr(result, "tempo", None)
     has_result = result is not None
     # The resolver's no-tempo shape: empty candidates and primary_bpm == 0.0.
@@ -410,9 +459,9 @@ def build_tempo_view(
         axis_ticks=AXIS_TICKS,
         curve_bpms=curve.bpms if curve is not None else None,
         curve_salience=curve.salience if curve is not None else None,
-        candidates=_candidate_rows(tempo) if has_tempo else (),
-        markers=_markers(tempo) if has_tempo else (),
-        readout=_readout(verdict_view, result, has_tempo, signal_result),
+        candidates=_candidate_rows(tempo, confirmed_bpm) if has_tempo else (),
+        markers=_markers(tempo, confirmed_bpm) if has_tempo else (),
+        readout=_readout(verdict_view, result, has_tempo, signal_result, confirmed_bpm),
     )
 
 

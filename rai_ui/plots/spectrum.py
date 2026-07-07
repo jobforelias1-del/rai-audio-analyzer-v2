@@ -12,7 +12,10 @@ the linear map over the plot's geometry IS the log-frequency map and every
 layer (curve, axis labels) shares it. The design's five axis labels sit at
 their TRUE log positions — the approved mock's even spacing was a shortcut;
 the caption "log frequency" is the binding intent (design recon §1a) — and
-only the end labels carry units (``20 Hz`` … ``20 kHz``).
+only the end labels carry units (``20 Hz`` … ``20 kHz``). The drawn curve is
+min/max-decimated to ≤ 2048 points (R-M3-15, paint-cost fix — visually
+identical, every PSD bin provably contained); antialiasing stays ON for this
+diagonal curve, unlike the waveform's AA-off vertical columns.
 
 The y-domain is the display-normalized dB range from
 :mod:`rai_ui.state.signal_view` (curve max at the 0 dB top, −90 dB floor —
@@ -51,6 +54,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from rai_ui.plots.decimate import minmax_decimate
 from rai_ui.plots.tempogram import _WorkingOverlay
 from rai_ui.state.signal_view import (
     EMPTY_SIGNAL_VIEW,
@@ -109,10 +113,57 @@ Y_VIEW_TOP_DB = SPECTRUM_TOP_DB + Y_HEADROOM_DB
 # axis rows' rules stand in for the edges (04:410).
 GRID_FRACS = (0.25, 0.5, 0.75)
 
+# R-M3-15: the drawn curve is capped at this many points. A real file's Welch
+# grid is ~8k bins — an order of magnitude past any plausible bed width — and
+# stroking all of them under the 2.0px antialiased data pen cost ~67 ms per
+# paint (recon-measured; ~17 ms decimated). Min/max decimation keeps both
+# extremes per bin, so the drawn curve provably contains every PSD bin and a
+# single-bin spike stays visible. Antialiasing itself is KEPT: unlike the
+# waveform's vertical columns, this curve is diagonal and DOES alias.
+SPECTRUM_MAX_POINTS = 2048
+
 
 def log_x_fraction(freq_hz: float) -> float:
     """A frequency's fractional position on the locked log-x span (0..1)."""
     return (math.log10(freq_hz) - _LOG_MIN) / (_LOG_MAX - _LOG_MIN)
+
+
+def decimate_curve(
+    x: np.ndarray, y: np.ndarray, max_points: int = SPECTRUM_MAX_POINTS
+) -> tuple[np.ndarray, np.ndarray]:
+    """Min/max-decimate a dense ``(x, y)`` curve to at most ``max_points``.
+
+    Display-only (R-M3-15): each of ``max_points // 2`` contiguous bins
+    contributes two drawn points — its y-minimum at the bin's first x and its
+    y-maximum at the bin's last x — so the drawn polyline contains every
+    sample's y (the ``minmax_decimate`` doctrine: never drop a transient) and
+    the curve's x endpoints are preserved exactly. Within a bin the two
+    extremes ride the bin's edge x-positions rather than their true ones —
+    sub-pixel at any plausible bed width, and the pairing is monotonic in x.
+
+    A curve already at or below ``max_points`` passes through unchanged —
+    decimating would fabricate nothing and lose nothing, so it is skipped.
+    Pure numpy, exposed for tests. Bin geometry (linspace edges) is exactly
+    ``rai_ui.plots.decimate.minmax_decimate``'s, which computes the y
+    extremes.
+    """
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    n = y.size
+    if n <= max_points:
+        return x, y
+    bins = max_points // 2
+    mins, maxs = minmax_decimate(y, bins)
+    # The same edge geometry minmax_decimate used (n > bins holds because
+    # n > max_points >= 2 * bins), re-derived here for the x positions.
+    edges = np.linspace(0, n, bins + 1).astype(np.intp)
+    xs = np.empty(2 * bins, dtype=np.float64)
+    ys = np.empty(2 * bins, dtype=np.float64)
+    xs[0::2] = x[edges[:-1]]  # bin's first sample x
+    xs[1::2] = x[edges[1:] - 1]  # bin's last sample x — keeps the endpoints
+    ys[0::2] = mins
+    ys[1::2] = maxs
+    return xs, ys
 
 
 class _SpectrumAxisRow(QWidget):
@@ -250,9 +301,12 @@ class SpectrumPane(QFrame):
         if vm.spectrum_freqs is not None and vm.spectrum_db is not None:
             # The view-model's arrays are display-normalized (max 0 dB, −90
             # floor) and masked ≥ 20 Hz — plotting at log10(f) puts them on
-            # the locked log-x domain.
+            # the locked log-x domain. Dense curves are min/max-decimated to
+            # ≤ SPECTRUM_MAX_POINTS drawn points (R-M3-15) — the paint cost
+            # fix; the view-model itself stays full-resolution.
             x = np.log10(np.asarray(vm.spectrum_freqs, dtype=np.float64))
             y = np.asarray(vm.spectrum_db, dtype=np.float64)
+            x, y = decimate_curve(x, y)
             self._curve.setData(x, y)
             self._curve.setVisible(True)
         else:

@@ -28,13 +28,31 @@ and ``last_signal_obj``, are already stored when it fires: the session's
 documented ordering contract) and pushes them to the three sections, the
 rail, and the bridge, so no two surfaces can ever disagree.
 
-M3 seams (ruling R6): hear / tiebreak / undo render live-looking and always
-answer — MainWindow resolves their signals to the "arrives in M3" toasts.
+M3 — the flagship is live (the R6 inert toasts are gone). MainWindow is the
+one place the widget signals meet the services:
+
+* ``tiebreak_requested`` (candidates header / rail / bridge) opens the C-14
+  overlay over the candidates pane — ambiguous verdicts only (R-M3-6, tested
+  through the view-model's ``show_tiebreak`` flag, never a verdict-kind
+  branch);
+* ``hear_requested`` plays the clicked ROW's click-grid premix through the
+  ONE shared :class:`ClickPreview` engine and fires the verbatim design toast
+  (R-M3-10); the overlay's preview buttons drive the same engine;
+* overlay ``confirm_requested`` -> ``session.confirm(bpm)`` (reducer + journal
+  append) + the design toast; ``undo_requested`` (candidates header ghost /
+  rail / bridge inline links) -> ``session.undo()`` + the design toast — the
+  session owns the transitions (R-M3-17/20);
+* the header genre chip opens the profile popover (R-M3-11); its relearn /
+  revert signals drive the :class:`RelearnController` (progress on the status
+  bar, completion toasts per R-M3-16);
+* click-preview lifecycle: ``begin``/``fail`` clear the engine (stale premixes
+  from the previous file must never keep playing), a fresh result re-arms it
+  with the new Features/PCM; closing the overlay stops playback (R-M3-8).
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Q_ARG, QMetaObject, QSettings, Qt, QThread, QUrl
+from PySide6.QtCore import Q_ARG, QMetaObject, QPoint, QSettings, Qt, QThread, QUrl
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -51,6 +69,13 @@ from rai_ui.sections.report import ReportSection
 from rai_ui.sections.signal import SignalSection
 from rai_ui.sections.tempo import TempoSection
 from rai_ui.services import recent_files
+from rai_ui.services.click_preview import ClickPreview
+from rai_ui.services.relearn import (
+    RelearnController,
+    RelearnError,
+    profile_state,
+    revert_profile,
+)
 from rai_ui.services.worker import AnalysisWorker
 from rai_ui.state.session import SessionState
 from rai_ui.state.signal_view import build_overview_view, build_signal_view
@@ -60,6 +85,7 @@ from rai_ui.widgets.header import HeaderBar, format_file_meta
 from rai_ui.widgets.meter_bridge import MeterBridge
 from rai_ui.widgets.metric_readout import MetricRail
 from rai_ui.widgets.nav_rail import SECTIONS, NavRail
+from rai_ui.widgets.profile_popover import ProfilePopover
 from rai_ui.widgets.status_bar import StatusBar
 from rai_ui.widgets.toast import Toast
 
@@ -82,9 +108,18 @@ _PLACEHOLDER_TITLES = {
     "Compare": "A/B compare arrives in M4",
 }
 
-# R6 toast copy — verbatim from the M1 architecture brief.
-TOAST_TIEBREAK_M3 = "Tiebreak flow arrives in M3"
-TOAST_HEAR_M3 = "Audio preview arrives in M3"
+# M3 toast copy — verbatim design copy on the single always-neutral slot
+# (R-M3-16; the verdict block is the semantic voice, toasts only confirm).
+TOAST_CONFIRM = "Ground truth saved — the engine learns from this"
+TOAST_UNDO = "Reverted — verdict back to AMBIGUOUS"
+# Relearn has no designed surface — RC copy of record (R-M3-16).
+TOAST_RELEARN_DONE_FMT = "Profile relearned from {n} confirmed tracks"
+TOAST_PROFILE_REVERTED = "Reverted to previous profile"
+
+
+def hear_toast(bpm: float) -> str:
+    """The table ▶ hear toast — ``bpm.toFixed(2)`` verbatim (04:738)."""
+    return f"▶ click-grid preview · {bpm:.2f} BPM — audible in the app"
 
 # QSettings key for the rail⇄bridge choice (ruling R10).
 _RAIL_COLLAPSED_KEY = "ui/rail_collapsed"
@@ -121,6 +156,14 @@ class MainWindow(QMainWindow):
         self.session = SessionState(self)
         self._generation = 0
         self._threads: list[tuple[QThread, AnalysisWorker]] = []
+
+        # -- M3 services -------------------------------------------------------
+        # ONE shared click-grid engine for the table's ▶ hear AND the tiebreak
+        # cards (R-M3-8); plain Python (no QObject) — every call site below is
+        # same-thread UI code, and tests swap the attribute for a fake.
+        self.click_preview = ClickPreview()
+        # Relearn runs on its own QThread via the controller (R-M3-11).
+        self.relearn = RelearnController(self)
 
         # -- chrome + stack ---------------------------------------------------
         self.header = HeaderBar(self)
@@ -171,6 +214,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         self.toast = Toast(self)
+        # The R-M3-11 profile popover (a Qt popup — outside clicks dismiss it).
+        self.profile_popover = ProfilePopover(self)
 
         # -- wiring -----------------------------------------------------------
         self.nav.section_selected.connect(self._on_section_selected)
@@ -189,12 +234,27 @@ class MainWindow(QMainWindow):
         self.session.result_ready.connect(self._on_result_ready)
         self.session.analysis_failed.connect(self._on_analysis_failed)
 
-        # M3 seams (R6): every live-looking action answers with a toast.
+        # M3 flagship wiring: every entry point resolves to the real flow.
         self.tempo_section.hear_requested.connect(self._on_hear_requested)
         self.tempo_section.tiebreak_requested.connect(self._on_tiebreak_requested)
+        self.tempo_section.undo_requested.connect(self._on_undo_requested)
+        # The overlay's own signals, bubbled up through the section (R-M3-17
+        # cut the seam; this is the Stage-3 sink side).
+        self.tempo_section.preview_requested.connect(self._on_preview_requested)
+        self.tempo_section.preview_stop_requested.connect(self._on_preview_stop_requested)
+        self.tempo_section.confirm_requested.connect(self._on_confirm_requested)
+        self.tempo_section.tiebreak_closed.connect(self._on_tiebreak_closed)
         for surface in (self.rail, self.bridge):
             surface.tiebreak_requested.connect(self._on_tiebreak_requested)
-            surface.undo_requested.connect(self._on_tiebreak_requested)
+            surface.undo_requested.connect(self._on_undo_requested)
+
+        # Profile popover + relearn (R-M3-11/16).
+        self.header.profile_chip_clicked.connect(self._open_profile_popover)
+        self.profile_popover.relearn_requested.connect(self._on_relearn_requested)
+        self.profile_popover.revert_requested.connect(self._on_revert_requested)
+        self.relearn.progress.connect(self._on_relearn_progress)
+        self.relearn.finished.connect(self._on_relearn_finished)
+        self.relearn.failed.connect(self._on_relearn_failed)
 
         # Rail⇄bridge mode: restore the persisted choice (R10), then apply it
         # for the current (hero) page — both surfaces start hidden.
@@ -257,6 +317,9 @@ class MainWindow(QMainWindow):
         worker.moveToThread(thread)
         worker.finished.connect(self._on_worker_finished)
         worker.failed.connect(self._on_worker_failed)
+        # R-M3-12: the one-shot "user profile unreadable" notice (bound-method
+        # connection — cross-thread functor connections misdeliver, landmine 2).
+        worker.profile_fallback.connect(self._on_profile_fallback)
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
         self._threads.append((thread, worker))
@@ -270,12 +333,17 @@ class MainWindow(QMainWindow):
         return worker is not None and getattr(worker, "_generation", None) == self._generation
 
     def _on_worker_finished(
-        self, result, features, signal_obj, seconds, signal_result=None
+        self, result, features, signal_obj, seconds, signal_result=None, md5=None
     ) -> None:
         if not self._sender_is_current():
             return  # stale: a newer analysis superseded this one
         self.session.finish(
-            result, features, signal_obj, seconds, signal_result=signal_result
+            result,
+            features,
+            signal_obj,
+            seconds,
+            signal_result=signal_result,
+            md5=md5,  # M3: worker-computed whole-file hash (additive, sixth)
         )
 
     def _on_worker_failed(self, message: str) -> None:
@@ -283,10 +351,18 @@ class MainWindow(QMainWindow):
             return
         self.session.fail(message)
 
+    def _on_profile_fallback(self, message: str) -> None:
+        # Only the CURRENT analysis may toast — a stale worker's fallback
+        # notice would attribute the wrong run's profile state to this one.
+        if self._sender_is_current():
+            self.toast.show_message(message)
+
     def _prune_finished_threads(self) -> None:
         self._threads = [(t, w) for (t, w) in self._threads if t.isRunning() or not t.isFinished()]
 
     def closeEvent(self, event) -> None:
+        self.click_preview.stop()  # release the audio stream before teardown
+        self.relearn.close()  # quit+wait the relearn thread (landmine 1)
         for thread, _worker in self._threads:
             thread.quit()
             thread.wait(2000)
@@ -366,6 +442,11 @@ class MainWindow(QMainWindow):
         self._refresh_views()
 
     def _on_working(self, active: bool) -> None:
+        if active:
+            # A new analysis is in flight: stop playback and drop every premix
+            # built from the PREVIOUS file's PCM (R-M3-8 — a pointer-swap
+            # buffer must never keep playing under the new file's name).
+            self.click_preview.clear()
         # The file chip names the file being analyzed from the moment work
         # starts — "no file loaded" (or the previous file's metadata) over a
         # live analysis would be dishonest. Real duration/rate/channels meta
@@ -378,6 +459,11 @@ class MainWindow(QMainWindow):
     def _on_result_ready(self, result) -> None:
         import os
 
+        # Arm the click engine with the fresh payload (the session's ordering
+        # contract guarantees last_features/last_signal_obj are already set).
+        self.click_preview.set_source(
+            self.session.last_features, self.session.last_signal_obj
+        )
         self.header.show_file(
             os.path.basename(result.path),
             format_file_meta(result.duration, result.sr, result.channels),
@@ -391,6 +477,9 @@ class MainWindow(QMainWindow):
         self.nav.set_current("Tempo")
 
     def _on_analysis_failed(self, message: str) -> None:
+        # begin() already cleared the engine; clearing again keeps the fail
+        # path self-sufficient (no source, no playback, empty cache).
+        self.click_preview.clear()
         self.status.set_failed()
         if self.session.path:
             import os
@@ -400,10 +489,111 @@ class MainWindow(QMainWindow):
             )
         self.toast.show_message(f"Analysis failed — {message}")
 
-    # -- M3 seams (R6): present-but-inert actions, never a dead click ---------------
+    # -- M3 flagship: tiebreak / hear / undo / confirm --------------------------------
 
-    def _on_hear_requested(self, _bpm: float) -> None:
-        self.toast.show_message(TOAST_HEAR_M3)
+    def _on_hear_requested(self, bpm: float) -> None:
+        """▶ hear previews the clicked ROW's bpm (R-M3-10) + the design toast.
+
+        The toast fires unconditionally — verbatim demo behavior (04:738);
+        a missing audio device degrades inside the service with a log, never
+        a crash and never a dead click.
+        """
+        self.click_preview.preview(bpm)
+        self.toast.show_message(hear_toast(bpm))
 
     def _on_tiebreak_requested(self) -> None:
-        self.toast.show_message(TOAST_TIEBREAK_M3)
+        """Open the C-14 overlay — ambiguous verdicts only (R-M3-6).
+
+        The gate reads the view-model's ``show_tiebreak`` flag (the derived
+        "this verdict has a tiebreak entry point" truth) rather than
+        branching on verdict kinds here. In confirmed state there is no
+        entry point — undo first (R-M3-6/18). The rail/bridge buttons are
+        visible on any section, so land on Tempo where the overlay lives.
+        """
+        if not self.tempo_section.view().readout.verdict.show_tiebreak:
+            return
+        self.nav.set_current("Tempo")
+        self.tempo_section.open_tiebreak()
+
+    def _on_undo_requested(self) -> None:
+        """session.undo() owns the transition (R-M3-17/20); toast on success.
+
+        The reducer's guard is the truth: if nothing was undoable (a stale
+        click racing a state change), the state is unchanged and no toast
+        fires — "Reverted" must never announce a revert that didn't happen.
+        """
+        before = self.session.verdict_state
+        self.session.undo()
+        if self.session.verdict_state is not before:
+            self.toast.show_message(TOAST_UNDO)
+
+    def _on_confirm_requested(self, bpm: float) -> None:
+        """Overlay confirm -> session.confirm(bpm) + the design toast.
+
+        Confirm stops playback (design §3.3): the overlay already emitted its
+        own preview stop, but a table-originated ▶ hear may still be running —
+        stop the shared engine outright (idempotent).
+        """
+        self.click_preview.stop()
+        before = self.session.verdict_state
+        self.session.confirm(bpm)
+        if self.session.verdict_state is not before:
+            self.toast.show_message(TOAST_CONFIRM)
+
+    def _on_preview_requested(self, bpm: float) -> None:
+        # Tiebreak card preview: same engine as ▶ hear; starting one stops the
+        # previous (pointer-swap when already playing, D3). No toast — only
+        # the table's hear cell has designed toast copy (recon §5).
+        self.click_preview.preview(bpm)
+
+    def _on_preview_stop_requested(self) -> None:
+        self.click_preview.stop()
+
+    def _on_tiebreak_closed(self) -> None:
+        # Overlay close stops playback (R-M3-8) — including a table-originated
+        # preview; the overlay's own stop signal only covers its cards.
+        self.click_preview.stop()
+
+    # -- M3 flagship: profile popover + relearn (R-M3-11) ------------------------------
+
+    def _open_profile_popover(self) -> None:
+        """Render fresh profile truth into the popover and pop it on the chip."""
+        state = profile_state()
+        self.profile_popover.set_state(
+            profile_kind=state.kind,
+            relearned_date=state.relearned_at,
+            confirmed_count=state.confirmed_count,
+            backup_exists=state.backup_exists,
+        )
+        chip = self.header.genre_chip
+        corner = chip.mapToGlobal(QPoint(chip.width(), chip.height() + 6))
+        self.profile_popover.open_at(
+            QPoint(corner.x() - self.profile_popover.width(), corner.y())
+        )
+
+    def _on_relearn_requested(self) -> None:
+        self.profile_popover.hide()
+        if self.relearn.start():
+            # A determinate count arrives with the first progress signal.
+            self.status.set_relearn_progress("relearning…")
+
+    def _on_relearn_progress(self, done: int, total: int) -> None:
+        self.status.set_relearn_progress(f"relearning {done}/{total}")
+
+    def _on_relearn_finished(self, report) -> None:
+        self.status.set_relearn_progress(None)
+        self.toast.show_message(TOAST_RELEARN_DONE_FMT.format(n=report.learned))
+
+    def _on_relearn_failed(self, message: str) -> None:
+        self.status.set_relearn_progress(None)
+        # RelearnError messages are written for humans and pass verbatim.
+        self.toast.show_message(message)
+
+    def _on_revert_requested(self) -> None:
+        self.profile_popover.hide()
+        try:
+            revert_profile()
+        except RelearnError as exc:
+            self.toast.show_message(str(exc))
+            return
+        self.toast.show_message(TOAST_PROFILE_REVERTED)

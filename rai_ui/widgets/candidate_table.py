@@ -23,8 +23,9 @@ design's own Qt guidance, fixed by M0). Chips are **delegate-painted**, not
 
 The ``▶ hear`` cell is likewise delegate-painted (the ▶ is a drawn
 ``glyph_icon``, never a font glyph — P3 rule) and clicks are routed through
-the view's ``clicked`` signal; in M1 the action is present-but-inert (R6):
-MainWindow answers ``hear_requested`` with the "arrives in M3" toast.
+the view's ``clicked`` signal; as of M3 the action is live: MainWindow
+answers ``hear_requested`` with the shared click-preview engine plus the
+verbatim design toast (R-M3-10).
 
 Sizes are pinned widget-level per Landmine 6; the theme QSS
 (``QFrame#candidatePane`` / ``QTableView#candidateTable``) owns surfaces and
@@ -80,6 +81,7 @@ from rai_ui.theme._tokens_gen import (
 from rai_ui.theme.icons import glyph_icon
 from rai_ui.widgets import mono_font, ui_font
 from rai_ui.widgets.chips import CHIP_HEIGHT, paint_chip, paint_human_pill
+from rai_ui.widgets.tiebreak import TiebreakOverlay
 
 # Column order per the design grid `88px 168px 1fr 64px 56px 88px` with a
 # 12px column gap (CO:273). Qt sections are contiguous (no grid gap), so each
@@ -443,10 +445,24 @@ class CandidatePane(QFrame):
     ``set_rows`` consumes the whole ``TempoViewModel`` (rows AND the verdict
     that decides which header action shows); ``set_working`` overlays the
     skeleton state without disturbing the last rows.
+
+    M3: the tiebreak overlay (C-14) mounts here as a raised child covering
+    the WHOLE pane — the design's ``position:absolute; inset:0`` over the
+    candidates card (04:308), the same raise idiom as the plots' working
+    overlay. Its signals bubble through this pane; MainWindow opens it via
+    ``open_tiebreak`` (ambiguous verdicts only, R-M3-6).
     """
 
     hear_requested = Signal(float)  # bpm of the clicked row
     tiebreak_requested = Signal()
+    undo_requested = Signal()  # header "Undo tiebreak" ghost (R-M3-17)
+    # Bubbled from the tiebreak overlay (audio service wired by MainWindow):
+    preview_requested = Signal(float)
+    preview_stop_requested = Signal()
+    confirm_requested = Signal(float)
+    # ✕/Esc/auto-dismiss (NOT confirm) — MainWindow stops ALL playback on it
+    # (R-M3-8: overlay close stops playback, table-originated included).
+    tiebreak_closed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -470,6 +486,14 @@ class CandidatePane(QFrame):
         self._body.addWidget(self.empty_label)  # _PAGE_EMPTY
         self._body.addWidget(self.skeleton)  # _PAGE_SKELETON
         outer.addWidget(self._body, 1)
+
+        # The C-14 tiebreak overlay: raised child, NOT a stacked-body page —
+        # it covers header and body alike (inset:0 over the pane).
+        self.tiebreak = TiebreakOverlay(self)
+        self.tiebreak.preview_requested.connect(self.preview_requested)
+        self.tiebreak.preview_stop_requested.connect(self.preview_stop_requested)
+        self.tiebreak.confirm_requested.connect(self.confirm_requested)
+        self.tiebreak.closed.connect(self.tiebreak_closed)
 
         self._working = False
         self._refresh_body()
@@ -500,9 +524,10 @@ class CandidatePane(QFrame):
         header.addWidget(caption)
         header.addStretch(1)
 
-        # Right-docked contextual actions. Both are M3 seams rendered live per
-        # R6 (never disabled-greyed, never a dead click): each routes to
-        # tiebreak_requested, which MainWindow answers with the M3 toast.
+        # Right-docked contextual actions: "Open tiebreak" (ambiguous) routes
+        # to tiebreak_requested (MainWindow opens the overlay); the confirmed
+        # state's "Undo tiebreak" ghost emits its own undo_requested
+        # (R-M3-17 — in M1 both wrongly routed to tiebreak).
         self.tiebreak_button = QPushButton(OPEN_TIEBREAK_TEXT, self)
         self.tiebreak_button.setObjectName("tiebreakButton")
         self.tiebreak_button.setFixedHeight(30)
@@ -542,7 +567,7 @@ class CandidatePane(QFrame):
             # token: color.surface.hover
             f" background-color: {COLOR_SURFACE_HOVER}; }}"
         )
-        self.undo_button.clicked.connect(self.tiebreak_requested.emit)
+        self.undo_button.clicked.connect(self.undo_requested.emit)
         self.undo_button.hide()
         header.addWidget(self.undo_button)
         return header
@@ -619,13 +644,23 @@ class CandidatePane(QFrame):
     # -- public API (widget contract) ------------------------------------------
 
     def set_rows(self, vm: TempoViewModel) -> None:
-        """Render the view-model: rows, header action, empty copy."""
+        """Render the view-model: rows, header action, empty copy, overlay."""
         self.model.set_rows(vm.candidates)
         self.delegate.set_hover_row(-1)  # stale hover index after a reset
 
         verdict = vm.readout.verdict
         self.tiebreak_button.setVisible(verdict.show_tiebreak)
         self.undo_button.setVisible(verdict.show_undo)
+
+        # The overlay always tracks the current view-model (a fresh analysis
+        # resets its selection; the same analysis re-rendering preserves it).
+        # Only an ambiguous verdict has a tiebreak entry point (R-M3-6:
+        # show_tiebreak IS the ambiguous test) — any other verdict landing
+        # while the overlay is up (new analysis, confirm, failure) dismisses
+        # it, preview stopped, so an impossible state can't be reached.
+        self.tiebreak.set_view(vm)
+        if self.tiebreak.isVisible() and not verdict.show_tiebreak:
+            self.tiebreak.dismiss()
 
         # `no candidates — {sub}` reuses the verdict's neutral sub-line (the
         # same {sub} the design threads through plot and table empty copy).
@@ -640,7 +675,30 @@ class CandidatePane(QFrame):
         self._working = bool(active)
         self._refresh_body()
 
+    def open_tiebreak(self) -> None:
+        """Raise the C-14 overlay over the whole pane (MainWindow calls this
+        for ambiguous verdicts only — confirmed state has no entry point)."""
+        self.tiebreak.set_target_geometry(self._tiebreak_rect())
+        self.tiebreak.show_overlay()
+
+    def close_tiebreak(self) -> None:
+        """Dismiss the overlay if open (✕ semantics: preview stops, the
+        selection survives). Safe to call when closed."""
+        if self.tiebreak.isVisible():
+            self.tiebreak.dismiss()
+
     # -- internals --------------------------------------------------------------
+
+    def _tiebreak_rect(self) -> QRect:
+        # inset:0 of the pane's padding box — inside the 1px QSS border, so
+        # the overlay's radius-11 surface nests in the pane's radius-12 frame.
+        return self.rect().adjusted(1, 1, -1, -1)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 — Qt naming
+        super().resizeEvent(event)
+        if self.tiebreak.isVisible():
+            self.tiebreak.set_target_geometry(self._tiebreak_rect())
+            self.tiebreak.raise_()
 
     def _refresh_body(self) -> None:
         if self._working:

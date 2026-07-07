@@ -372,9 +372,13 @@ class TestSignals:
         assert pane.undo_button.isVisibleTo(pane)
         assert pane.undo_button.text() == "Undo tiebreak"
         assert not pane.tiebreak_button.isVisibleTo(pane)
-        # Inert M3 seam: routed to tiebreak_requested (MainWindow toasts).
-        with qtbot.waitSignal(pane.tiebreak_requested, timeout=1000):
+        # R-M3-17: the undo ghost has its OWN signal now (M1 routed it to
+        # tiebreak_requested as an inert seam) — and it must NOT fire tiebreak.
+        tiebreak_fired = []
+        pane.tiebreak_requested.connect(lambda: tiebreak_fired.append(True))
+        with qtbot.waitSignal(pane.undo_requested, timeout=1000):
             pane.undo_button.click()
+        assert tiebreak_fired == []
 
     def test_confident_hides_both_header_actions(self, pane):
         pane.set_rows(make_vm())

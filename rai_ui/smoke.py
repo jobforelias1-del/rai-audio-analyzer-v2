@@ -17,17 +17,23 @@ Under ``smoke_frozen.sh`` the probe must exercise the native cocoa platform
 
 Exit codes: 0 = pass · 1 = failure · 2 = analysis timeout. EXIT_OK requires
 ALL of ``window_shown``, ``accepts_drops``, ``dnd_delivered``,
-``analysis_ok``, ``tempo_ok`` and ``signal_ok`` to be truthy (see
-:data:`REQUIRED_TRUE_KEYS` / :func:`exit_code_for`). ``tempo_ok`` and
+``analysis_ok``, ``tempo_ok``, ``signal_ok`` and ``truth_ok`` to be truthy
+(see :data:`REQUIRED_TRUE_KEYS` / :func:`exit_code_for`). ``tempo_ok`` and
 ``signal_ok`` are load-bearing here, not advisory: the worker deliberately
 degrades a metrics-layer crash to ``SignalResult=None`` (R-M2-15 — the
 analysis stays green by design), so the exit code is the ONLY gate that
-catches a silently-dead M1/M2 rendering layer. ``build/smoke_frozen.sh``
-keys probe 1 off this exit code; its ``check_json`` field asserts are an
-independent, additive layer and stay unchanged. Audio playback problems are
-REPORTED (``audio_ok``/``audio_error``) but never fail the probe — CI
-runners and headless Macs have no output device, and that says nothing
-about the build.
+catches a silently-dead M1/M2 rendering layer. ``truth_ok`` (M3, R-M3-14,
+same landmine-14 contract) proves the flagship round-trip against an
+ISOLATED temp ground-truth store: posed confirm -> CONFIRMED · HUMAN
+renders (verdict kind + HumanPill row) -> journal write + lookup
+round-trip -> undo -> retraction written. The probe redirects the store's
+injectable directory factory to a temp dir for its whole run — it performs
+a REAL analysis in the user's environment, and touching the real journal
+would be a defect (R-M3-2). ``build/smoke_frozen.sh`` keys probe 1 off this
+exit code; its ``check_json`` field asserts are an independent, additive
+layer and stay unchanged. Audio playback problems are REPORTED
+(``audio_ok``/``audio_error``) but never fail the probe — CI runners and
+headless Macs have no output device, and that says nothing about the build.
 """
 
 from __future__ import annotations
@@ -47,6 +53,9 @@ EXIT_TIMEOUT = 2
 #: joined the required set when review found them write-only: a metrics-layer
 #: death degrades to ``SignalResult=None`` with ``analysis_ok`` still true, so
 #: an exit code keyed on analysis alone would stay green through it.
+#: ``truth_ok`` (M3) is load-bearing by the same rule (R-M3-14): confirm/undo
+#: degrade to logged no-ops by design, so only the exit code catches a dead
+#: ground-truth lane.
 REQUIRED_TRUE_KEYS = (
     "window_shown",
     "accepts_drops",
@@ -54,6 +63,7 @@ REQUIRED_TRUE_KEYS = (
     "analysis_ok",
     "tempo_ok",
     "signal_ok",
+    "truth_ok",
 )
 
 
@@ -104,6 +114,7 @@ def run_smoke(args) -> int:
         "ambiguous": None,
         "tempo_ok": None,
         "signal_ok": None,
+        "truth_ok": None,
         "seconds": None,
         "audio_ok": None,
         "commit": _commit(),
@@ -124,6 +135,30 @@ def run_smoke(args) -> int:
 
 
 def _probe(report: dict, want_audio: bool) -> int:
+    """Store-isolated wrapper around the probe body (R-M3-2).
+
+    The probe runs a REAL analysis (worker profile lookup, session store
+    lookup) and a posed confirm/undo round-trip (journal writes) — every
+    ground-truth store access is redirected to a throwaway temp dir for the
+    probe's whole lifetime, so the user's real journal is never read OR
+    written. The factory is restored exception-safely (``run_smoke`` may
+    execute inside a test process).
+    """
+    import shutil
+
+    from rai_ui.services import ground_truth_store
+
+    original_store_dir = ground_truth_store._store_dir
+    smoke_store_dir = tempfile.mkdtemp(prefix="rai_smoke_store_")
+    ground_truth_store._store_dir = lambda: smoke_store_dir
+    try:
+        return _probe_body(report, want_audio)
+    finally:
+        ground_truth_store._store_dir = original_store_dir
+        shutil.rmtree(smoke_store_dir, ignore_errors=True)
+
+
+def _probe_body(report: dict, want_audio: bool) -> int:
     # Qt imports live here, not at module top: rai_ui.smoke stays importable
     # in Qt-less environments (the engine CI job collects this tree).
     from PySide6.QtCore import (
@@ -241,6 +276,12 @@ def _probe(report: dict, want_audio: bool) -> int:
                 and svm.sub_card.value_text != dash
                 and svm.dr_card.value_text != dash
             )
+            # M3 check (R-M3-14): the ground-truth round-trip, posed against
+            # the ISOLATED temp store this probe redirected above. REQUIRED
+            # for EXIT_OK — confirm/undo degrade to logged no-ops by design,
+            # so the exit code is the only gate that catches a dead truth
+            # lane. As a JSON key it stays additive for check_json.
+            report["truth_ok"] = _check_truth(window, report)
         elif "error" in outcome:
             report["analysis_error"] = outcome["error"]
         elif timed_out:
@@ -294,6 +335,67 @@ def _inject_drop(
     )
     QApplication.sendEvent(window, drop)
     return bool(drop.isAccepted())
+
+
+def _check_truth(window, report: dict) -> bool:
+    """The R-M3-14 ground-truth round-trip, posed against the isolated store.
+
+    Runs entirely on state the real analysis just produced: confirm the
+    primary bpm through ``session.confirm`` (the ONLY mutation entry point,
+    R-M3-20), verify CONFIRMED · HUMAN actually renders (verdict kind + the
+    HumanPill row via the same ``view()`` introspection hooks ``tempo_ok``
+    uses), verify the journal write with a store lookup round-trip, then
+    ``session.undo`` and verify the retraction landed (lookup cleared AND a
+    retract record was appended — undo must survive a restart). Failure
+    detail goes to ``report["truth_error"]``; never raises.
+    """
+    try:
+        import json as _json
+
+        from rai_ui.services import ground_truth_store
+
+        session = window.session
+        md5 = session.last_md5
+        if not md5:
+            report["truth_error"] = "worker produced no md5 for the fixture"
+            return False
+        bpm = float(session.last_result.tempo.primary_bpm)
+
+        session.confirm(bpm)
+        vm = window.tempo_section.view()
+        confirmed_renders = bool(
+            vm.readout.verdict.kind == "confirmed_human"
+            and any(row.confirmed_human and row.is_primary for row in vm.candidates)
+        )
+        truth = ground_truth_store.lookup(md5)
+        wrote = truth is not None and abs(truth.bpm - bpm) < 1e-9
+
+        session.undo()
+        vm_after = window.tempo_section.view()
+        undone = vm_after.readout.verdict.kind != "confirmed_human"
+        cleared = ground_truth_store.lookup(md5) is None
+        with open(ground_truth_store.journal_path(), "r", encoding="utf-8") as fh:
+            records = [_json.loads(line) for line in fh if line.strip()]
+        retract_written = bool(
+            records
+            and records[-1].get("kind") == "retract"
+            and records[-1].get("retracts_md5") == md5
+        )
+
+        checks = {
+            "confirmed_renders": confirmed_renders,
+            "store_write_roundtrip": wrote,
+            "undo_restores_verdict": undone,
+            "lookup_cleared": cleared,
+            "retraction_written": retract_written,
+        }
+        if not all(checks.values()):
+            report["truth_error"] = {k: bool(v) for k, v in checks.items()}
+            return False
+        return True
+    except Exception as exc:
+        report["truth_error"] = f"{type(exc).__name__}: {exc}"
+        return False
 
 
 def _write_fixture() -> str:

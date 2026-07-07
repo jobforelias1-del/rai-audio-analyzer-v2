@@ -245,6 +245,121 @@ class TestGroupLabelUnderRealTheme:
 
 
 # ---------------------------------------------------------------------------
+# M3: tiebreak overlay + profile popover designed labels (landmine 8 —
+# offscreen widget tests without the QSS cannot catch a font wipe; only this
+# real-stylesheet gate proves the type_pin actually holds)
+# ---------------------------------------------------------------------------
+
+
+def _ambiguous_vm():
+    """A real ambiguous TempoViewModel with 3 candidates for overlay.set_view."""
+    from rai_analyzer.contracts import AnalysisResult, Candidate, TempoResult
+
+    from rai_ui.state import verdict
+    from rai_ui.state.tempo_view import build_tempo_view
+
+    tempo = TempoResult(
+        primary_bpm=205.15,
+        felt_bpm=102.57,
+        candidates=[
+            Candidate(bpm=205.15, score=2.02, salience=0.98),
+            Candidate(bpm=155.25, score=1.61, salience=0.76),
+            Candidate(bpm=102.5, score=1.44, salience=0.61),
+        ],
+        ambiguous=True,
+        ambiguity_reason=(
+            "primary 205 is outside the drill band [140–170], yet 155 sits inside it"
+        ),
+    )
+    result = AnalysisResult(
+        path="/tmp/amb.wav", duration=8.0, sr=44100, channels=2, tempo=tempo
+    )
+    state = verdict.reduce(verdict.INITIAL, verdict.OpenFile(path=result.path))
+    state = verdict.reduce(state, verdict.AnalysisOk(ambiguous=True))
+    return build_tempo_view(result, None, state)
+
+
+class TestM3TiebreakRampUnderRealTheme:
+    def _overlay(self):
+        from rai_ui.widgets.tiebreak import TiebreakOverlay
+
+        overlay = TiebreakOverlay()
+        overlay.set_view(_ambiguous_vm())
+        return overlay
+
+    def test_card_bpm_numeral_is_mono_30(self, themed_app, qtbot):
+        overlay = self._overlay()
+        font = _polished_font(themed_app, qtbot, overlay, overlay.cards[0].bpm_label)
+        _assert_type(font, MONO, 30, 600)  # R-M3-18: 04/C-14's 30, not C-07's 44
+
+    def test_title_is_sans_15(self, themed_app, qtbot):
+        overlay = self._overlay()
+        font = _polished_font(themed_app, qtbot, overlay, overlay.title_label)
+        _assert_type(font, SANS, 15, 600)  # header title 15/600 (04:309)
+
+    def test_reason_is_sans_12(self, themed_app, qtbot):
+        overlay = self._overlay()
+        font = _polished_font(themed_app, qtbot, overlay, overlay.reason_label)
+        _assert_type(font, SANS, 12, 400)  # verdictReasonBase 12px (04:311)
+
+    def test_band_tag_is_sans_11(self, themed_app, qtbot):
+        overlay = self._overlay()
+        font = _polished_font(themed_app, qtbot, overlay, overlay.cards[0].band_label)
+        _assert_type(font, SANS, 11, 500)  # band tag 11/500 (04:319)
+
+    def test_salience_label_is_mono_11(self, themed_app, qtbot):
+        overlay = self._overlay()
+        font = _polished_font(
+            themed_app, qtbot, overlay, overlay.cards[0].salience_label
+        )
+        _assert_type(font, MONO, 11, 400)  # 'salience 0.980' mono 11 (04:321)
+
+    def test_footer_hint_is_sans_11(self, themed_app, qtbot):
+        overlay = self._overlay()
+        font = _polished_font(themed_app, qtbot, overlay, overlay.hint_label)
+        _assert_type(font, SANS, 11, 400)  # footer hints 11px (04:336-338)
+
+
+class TestM3PopoverRampUnderRealTheme:
+    def _popover(self):
+        from rai_ui.widgets.profile_popover import ProfilePopover
+
+        popover = ProfilePopover()
+        popover.set_state(
+            profile_kind="user",
+            relearned_date="2026-07-07",
+            confirmed_count=3,
+            backup_exists=True,
+        )
+        return popover
+
+    def test_title_is_sans_11(self, themed_app, qtbot):
+        popover = self._popover()
+        font = _polished_font(themed_app, qtbot, popover, popover._title)
+        _assert_type(font, SANS, 11, 500)  # pane-label idiom 11/500
+
+    def test_source_line_is_mono_12(self, themed_app, qtbot):
+        popover = self._popover()
+        font = _polished_font(themed_app, qtbot, popover, popover._source_label)
+        _assert_type(font, MONO, 12, 400)  # measurement-ish status: mono 12
+
+    def test_count_line_is_mono_12(self, themed_app, qtbot):
+        popover = self._popover()
+        font = _polished_font(themed_app, qtbot, popover, popover._count_label)
+        _assert_type(font, MONO, 12, 400)
+
+    def test_revert_link_is_sans_12(self, themed_app, qtbot):
+        popover = self._popover()
+        font = _polished_font(themed_app, qtbot, popover, popover._revert_link)
+        _assert_type(font, SANS, 12, 400)  # inline accent-link idiom
+
+    def test_footer_is_sans_11(self, themed_app, qtbot):
+        popover = self._popover()
+        font = _polished_font(themed_app, qtbot, popover, popover._footer)
+        _assert_type(font, SANS, 11, 400)  # designed footer copy (04:83)
+
+
+# ---------------------------------------------------------------------------
 # CONTROL: bare default — the pins must not regress the unstyled case
 # ---------------------------------------------------------------------------
 
@@ -254,3 +369,11 @@ class TestControlBareDefault:
         rail = MetricRail()
         font = _polished_font(bare_app, qtbot, rail, rail.primary_value)
         _assert_type(font, MONO, 40, 600)
+
+    def test_tiebreak_bpm_still_mono_30_without_theme(self, bare_app, qtbot):
+        from rai_ui.widgets.tiebreak import TiebreakOverlay
+
+        overlay = TiebreakOverlay()
+        overlay.set_view(_ambiguous_vm())
+        font = _polished_font(bare_app, qtbot, overlay, overlay.cards[0].bpm_label)
+        _assert_type(font, MONO, 30, 600)

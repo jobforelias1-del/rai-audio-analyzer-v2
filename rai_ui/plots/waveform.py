@@ -13,6 +13,9 @@ widget derives NOTHING). It is drawn exactly the way the approved mock's
 ``M x ymin L x ymax`` segment per bin (04:666-674) — as a single
 ``PlotDataItem`` with ``connect="pairs"`` under the 1.2px cosmetic
 ``PEN_WAVEFORM`` (#3E97AB — the deliberate context-dim hue, tokens v0.1.3).
+Both envelope and spine render with per-item ``antialias=False`` (R-M3-15):
+antialiased stroking of a >1.0 px pen is Qt's raster-engine cliff (~167 ms
+per paint on 2048 columns) and per-column vertical strokes don't alias.
 A second polyline (the "spine") runs through the envelope midpoints with the
 same pen: for dense audio it vanishes inside the columns, but it is what
 makes sparse and silent renders honest — a passthrough envelope
@@ -202,9 +205,19 @@ class WaveformPane(QFrame):
         # --- static plot items (created once — set_view only mutates them) ----
         # Envelope columns: one vertical min→max stroke per bin, exactly the
         # mock's wave() path geometry (04:666-674), 1.2px cosmetic pen.
+        #
+        # Per-item ``antialias=False`` (R-M3-15, the Overview first-click lag
+        # fix): Qt's raster engine has a hard cliff stroking ANTIALIASED pens
+        # wider than 1.0 px — the app-global ``antialias=True`` forced these
+        # two items through outline-filled ``drawPath`` at ~167 ms per paint
+        # (recon-measured; ~2 ms with item AA off, which flips pyqtgraph to
+        # the fast ``drawLines`` path). Vertical 1-px-column strokes gain
+        # nothing from AA, and the approved 1.2 px width literal stays
+        # untouched. Every other plot keeps the global setting.
         self._envelope = pg.PlotDataItem(
             pen=qpen(PEN_WAVEFORM),  # token: color.plot.waveform (v0.1.3)
             connect="pairs",
+            antialias=False,  # R-M3-15: 167 ms → ~2 ms, vertical strokes don't alias
         )
         self._envelope.setZValue(-10)
         self._plot.addItem(self._envelope)
@@ -213,7 +226,10 @@ class WaveformPane(QFrame):
         # the same pen. Inside dense columns it is invisible; on a silent file
         # it IS the mock's 'flat' render (a continuous line on the center),
         # and on a passthrough envelope it connects the raw samples.
-        self._spine = pg.PlotDataItem(pen=qpen(PEN_WAVEFORM))  # token: color.plot.waveform
+        self._spine = pg.PlotDataItem(
+            pen=qpen(PEN_WAVEFORM),  # token: color.plot.waveform
+            antialias=False,  # R-M3-15: same paint cliff as the envelope
+        )
         self._spine.setZValue(-10)
         self._plot.addItem(self._spine)
 
