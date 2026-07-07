@@ -45,9 +45,11 @@ from rai_ui.widgets.candidate_table import (
     COLUMN_WIDTHS,
     HEADERS,
     HEAR_TEXT,
+    PLAYING_ROLE,
     ROW_GAP,
     ROW_HEIGHT,
     ROW_ROLE,
+    STOP_TEXT,
     CandidatePane,
     content_rect,
 )
@@ -384,6 +386,97 @@ class TestSignals:
         pane.set_rows(make_vm())
         assert not pane.tiebreak_button.isVisibleTo(pane)
         assert not pane.undo_button.isVisibleTo(pane)
+
+
+# ---------------------------------------------------------------------------
+# Playing state — the R-M3-21 truthful ▶ hear / ⏸ stop toggle pair
+# ---------------------------------------------------------------------------
+
+
+class TestPlayingState:
+    def test_cells_start_as_hear(self, pane):
+        pane.set_rows(make_vm())
+        for i in range(pane.model.rowCount()):
+            assert pane.model.index(i, COL_HEAR).data() == HEAR_TEXT
+            assert pane.model.index(i, COL_HEAR).data(PLAYING_ROLE) is False
+        assert STOP_TEXT == "⏸ stop"  # copy of record (⏸ drawn in paint)
+
+    def test_playing_row_renders_stop_others_stay_hear(self, pane):
+        pane.set_rows(make_vm())  # rows: 150.0, 75.0, 300.0
+        pane.set_playing_bpm(150.0)
+        assert pane.model.index(0, COL_HEAR).data() == STOP_TEXT
+        assert pane.model.index(0, COL_HEAR).data(PLAYING_ROLE) is True
+        for i in (1, 2):
+            assert pane.model.index(i, COL_HEAR).data() == HEAR_TEXT
+            assert pane.model.index(i, COL_HEAR).data(PLAYING_ROLE) is False
+
+    def test_set_playing_none_reverts_every_cell(self, pane):
+        pane.set_rows(make_vm())
+        pane.set_playing_bpm(150.0)
+        pane.set_playing_bpm(None)
+        for i in range(pane.model.rowCount()):
+            assert pane.model.index(i, COL_HEAR).data() == HEAR_TEXT
+            assert pane.model.index(i, COL_HEAR).data(PLAYING_ROLE) is False
+
+    def test_switching_rows_moves_the_stop_cell(self, pane):
+        pane.set_rows(make_vm())
+        pane.set_playing_bpm(150.0)
+        pane.set_playing_bpm(75.0)  # the one-engine switch
+        assert pane.model.index(0, COL_HEAR).data() == HEAR_TEXT
+        assert pane.model.index(1, COL_HEAR).data() == STOP_TEXT
+
+    def test_equality_is_exact_float_never_tolerance(self, pane):
+        # The documented comparison (R-M3-21): the same view-model float
+        # flows to the service's cache keys and back — a nearby-but-different
+        # bpm must NOT light any row.
+        pane.set_rows(make_vm())
+        pane.set_playing_bpm(150.0000001)
+        for i in range(pane.model.rowCount()):
+            assert pane.model.index(i, COL_HEAR).data() == HEAR_TEXT
+
+    def test_repaint_targets_only_the_changed_hear_cells(self, pane):
+        pane.set_rows(make_vm())
+        changes: list[tuple[int, int, int, int]] = []
+        pane.model.dataChanged.connect(
+            lambda tl, br, _roles=None: changes.append(
+                (tl.row(), tl.column(), br.row(), br.column())
+            )
+        )
+        pane.set_playing_bpm(150.0)
+        assert changes == [(0, COL_HEAR, 0, COL_HEAR)]
+        changes.clear()
+        pane.set_playing_bpm(75.0)  # old row reverts + new row flips
+        assert changes == [(0, COL_HEAR, 0, COL_HEAR), (1, COL_HEAR, 1, COL_HEAR)]
+        changes.clear()
+        pane.set_playing_bpm(75.0)  # no-op: nothing changed, nothing emitted
+        assert changes == []
+        pane.set_playing_bpm(None)
+        assert changes == [(1, COL_HEAR, 1, COL_HEAR)]
+
+    def test_playing_state_survives_a_same_analysis_rerender(self, pane):
+        # set_rows PRESERVES the playing bpm (module docstring): an undo/
+        # confirm re-render while the hear preview keeps playing must not
+        # blank a truthful stop cell.
+        pane.set_rows(make_vm())
+        pane.set_playing_bpm(150.0)
+        pane.set_rows(make_vm())  # same candidates re-rendered
+        assert pane.model.index(0, COL_HEAR).data() == STOP_TEXT
+
+    def test_rows_without_the_playing_bpm_render_all_hear(self, pane):
+        # A fresh candidate set that no longer carries the bpm simply shows
+        # no stop cell — no crash, no stale claim.
+        pane.set_rows(make_vm())
+        pane.set_playing_bpm(150.0)
+        pane.set_rows(make_vm(make_tempo(primary_bpm=99.0, extra_bpms=(198.0,))))
+        for i in range(pane.model.rowCount()):
+            assert pane.model.index(i, COL_HEAR).data() == HEAR_TEXT
+
+    def test_playing_pane_paints_without_error(self, qtbot, shown_pane):
+        # Exercise the delegate's ⏸ stop paint path (accent wash, drawn
+        # pause, "stop" label) alongside the untouched rows.
+        shown_pane.set_rows(make_vm())
+        shown_pane.set_playing_bpm(150.0)
+        assert not shown_pane.grab().toImage().isNull()
 
 
 # ---------------------------------------------------------------------------

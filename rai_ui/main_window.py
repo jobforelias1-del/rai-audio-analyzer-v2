@@ -35,9 +35,17 @@ one place the widget signals meet the services:
   overlay over the candidates pane — ambiguous verdicts only (R-M3-6, tested
   through the view-model's ``show_tiebreak`` flag, never a verdict-kind
   branch);
-* ``hear_requested`` plays the clicked ROW's click-grid premix through the
-  ONE shared :class:`ClickPreview` engine and fires the verbatim design toast
-  (R-M3-10); the overlay's preview buttons drive the same engine;
+* ``hear_requested`` toggles the clicked ROW's click-grid premix through the
+  ONE shared :class:`ClickPreview` engine (R-M3-10/21: clicking the playing
+  row STOPS it, any other row switches the preview — ``toggle`` is the
+  service's own same-bpm semantics) and fires the verbatim design toast ONLY
+  when playback actually starts (never on stop, never on a dead device); the
+  overlay's preview buttons drive the same engine. The table's ⏸ stop cell
+  follows the SERVICE: it is set from post-toggle ``playing_bpm``, cleared by
+  the engine's ``stopped`` signal, and cleared when a tiebreak-card preview
+  takes the engine over (a pointer swap keeps playing and never emits
+  ``stopped`` by contract, so that takeover is cleared explicitly at the one
+  card-preview entry point);
 * overlay ``confirm_requested`` -> ``session.confirm(bpm)`` (reducer + journal
   append) + a toast that BRANCHES on the returned :class:`ConfirmOutcome`
   (persistence honesty — the design toast only fires when a journal record
@@ -60,7 +68,8 @@ one place the widget signals meet the services:
   from the previous file must never keep playing), a fresh result re-arms it
   with the new Features/PCM; closing the overlay stops playback (R-M3-8). The
   engine's ``stopped`` signal (natural EOF, device death, external stop) feeds
-  back into the overlay so a card can never keep pulsing "previewing" over
+  back into the overlay AND the candidate table so a card can never keep
+  pulsing "previewing" — and a hear cell can never keep saying "stop" — over
   silence.
 """
 
@@ -287,10 +296,13 @@ class MainWindow(QMainWindow):
         # success, failure AND cancellation — there is no failed signal.
         self.relearn.finished.connect(self._on_relearn_finished)
 
-        # Playback-state honesty (findings 7/10/15): the engine's ``stopped``
-        # signal — natural EOF, device death, or an external stop — resets the
-        # tiebreak card's ▶/⏸ state so it never pulses "previewing" over
-        # silence and the next click starts fresh instead of dead-toggling.
+        # Playback-state honesty (findings 7/10/15 + R-M3-21): the engine's
+        # ``stopped`` signal — natural EOF, device death, or an external stop
+        # — resets the tiebreak card's ▶/⏸ state AND the candidate table's
+        # ⏸ stop cell so neither claims playback over silence and the next
+        # click starts fresh instead of dead-toggling. Bound-method
+        # connection (landmine 2 discipline), main-thread by the service's
+        # contract (the audio callback never emits).
         self.click_preview.stopped.connect(self._on_preview_stopped)
 
         # Rail⇄bridge mode: restore the persisted choice (R10), then apply it
@@ -543,14 +555,25 @@ class MainWindow(QMainWindow):
     # -- M3 flagship: tiebreak / hear / undo / confirm --------------------------------
 
     def _on_hear_requested(self, bpm: float) -> None:
-        """▶ hear previews the clicked ROW's bpm (R-M3-10) + the design toast.
+        """▶ hear is a truthful toggle on the clicked ROW's bpm (R-M3-10/21).
 
-        The toast fires unconditionally — verbatim demo behavior (04:738);
-        a missing audio device degrades inside the service with a log, never
-        a crash and never a dead click.
+        Clicking the playing row STOPS it; any other row switches the preview
+        (``ClickPreview.toggle`` — the service's own same-bpm semantics, so a
+        stale cell can never fork the truth). The design toast (04:738) fires
+        ONLY when playback actually starts — never on the stop leg, and never
+        when a missing/failed audio device made the start a no-op (the
+        service degrades with a log; the toast must not announce audio that
+        isn't audible). Start truth is read back from the SERVICE
+        (``playing_bpm`` after the toggle), and the same float — exact
+        equality with the service's cache keys, the documented comparison —
+        drives the table's ⏸ stop cell.
         """
-        self.click_preview.preview(bpm)
-        self.toast.show_message(hear_toast(bpm))
+        self.click_preview.toggle(bpm)
+        playing = self.click_preview.playing_bpm
+        started = playing is not None and playing == float(bpm)
+        self.tempo_section.set_playing_bpm(float(bpm) if started else None)
+        if started:
+            self.toast.show_message(hear_toast(bpm))
 
     def _on_tiebreak_requested(self) -> None:
         """Open the C-14 overlay — ambiguous verdicts only (R-M3-6).
@@ -618,6 +641,14 @@ class MainWindow(QMainWindow):
         # previous (pointer-swap when already playing, D3). No toast — only
         # the table's hear cell has designed toast copy (recon §5).
         self.click_preview.preview(bpm)
+        # The takeover ends any table-originated preview, but a pointer swap
+        # keeps the stream playing and therefore never emits ``stopped`` (the
+        # service's documented contract) — so the table's ⏸ stop cell is
+        # cleared HERE, at the one entry point every card preview funnels
+        # through (button click and the overlay's Space key alike). R-M3-21:
+        # the cell must not claim a preview the overlay now owns, even when
+        # the card's bpm equals the row's.
+        self.tempo_section.set_playing_bpm(None)
 
     def _on_preview_stop_requested(self) -> None:
         self.click_preview.stop()
@@ -625,10 +656,13 @@ class MainWindow(QMainWindow):
     def _on_preview_stopped(self) -> None:
         # The service says playback ended (natural EOF, a device that died,
         # or an explicit stop that ended live playback): reset the overlay's
-        # card to '▶ preview click grid' WITHOUT re-emitting a stop into the
-        # already-stopped engine. Idempotent — a stop the overlay itself
-        # initiated finds the preview slot already cleared.
+        # card to '▶ preview click grid' AND the table's hear cell to
+        # '▶ hear' (R-M3-21 — the cell follows the service, not click
+        # bookkeeping) WITHOUT re-emitting a stop into the already-stopped
+        # engine. Idempotent — a stop the overlay or the hear toggle itself
+        # initiated finds its slot already cleared.
         self.tempo_section.candidates.tiebreak.preview_ended()
+        self.tempo_section.set_playing_bpm(None)
 
     def _on_tiebreak_closed(self) -> None:
         # Overlay close stops playback (R-M3-8) — including a table-originated

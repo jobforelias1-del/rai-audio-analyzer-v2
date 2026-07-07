@@ -1,7 +1,9 @@
-# M3 Handoff — Phase 3 Flagship (built 2026-07-07 · awaiting operator acceptance)
+# M3 Handoff — Phase 3 Flagship (built 2026-07-07 · **OPERATOR-ACCEPTED 2026-07-07**)
 
-**Branch:** `phase3/m3-flagship` @ `1683b4d` — **LOCAL-ONLY, not merged, not pushed.**
-Merging and M4 both wait on Elias's explicit call.
+**Acceptance:** Elias's pass — one confident control case + three ambiguous French drill tracks, all resolved correctly through human confirmation; persistence, reload, and relearn behaved as expected; **click sat on the grid across all four tracks, A/B held level, EOF tick inaudible** (the three ear-checks passed). No regressions.
+**R-M3-21 (added at acceptance, pre-merge, per Elias's call):** the table's ▶ hear cell is now a truthful toggle pair — ⏸ stop (accent, calm) while its row plays; same-row click stops; cell state follows the SERVICE (stopped signal + takeover clearing), never click bookkeeping; toast on start only.
+
+**Branch:** `phase3/m3-flagship` — merged to main on Elias's greenlight (M4 held for explicit authorization).
 Baseline underneath: `main` @ `be0688a` (M2 landed + accepted 2026-07-07).
 Pre-M2 engine files byte-untouched since `v3-baseline-phase0`; M2's metrics/beatgrid unchanged this milestone.
 

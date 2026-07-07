@@ -435,6 +435,139 @@ def test_eof_stopped_preview_resets_card_and_next_click_is_live(
 
 
 # ---------------------------------------------------------------------------
+# R-M3-21: the hear cell is a truthful ▶ hear / ⏸ stop toggle pair
+# ---------------------------------------------------------------------------
+
+
+def _click_hear_cell(qtbot, window, row: int) -> None:
+    """A REAL mouse click on the hear cell of ``row`` (the production
+    view.clicked → hear_requested → MainWindow toggle path, end to end)."""
+    from rai_ui.widgets.candidate_table import COL_HEAR
+
+    pane = window.tempo_section.candidates
+    rect = pane.view.visualRect(pane.model.index(row, COL_HEAR))
+    qtbot.mouseClick(
+        pane.view.viewport(), Qt.MouseButton.LeftButton, pos=rect.center()
+    )
+
+
+def test_hear_cell_toggle_arc(window, qtbot, tmp_path):
+    """hear → the cell flips to ⏸ stop + design toast; same-row click stops
+    (cell reverts, NO second toast — start-only); other-row click switches
+    the one engine and moves the stop cell (R-M3-21)."""
+    import rai_ui.main_window as mw
+    from rai_ui.widgets.candidate_table import COL_HEAR, HEAR_TEXT, STOP_TEXT
+
+    fake = window.click_preview
+    window.show()
+    wav = _write_drill(tmp_path, 140.0)
+    _analyze(window, qtbot, wav)
+
+    model = window.tempo_section.candidates.model
+    assert model.rowCount() >= 2
+    bpm0 = window.tempo_section.view().candidates[0].bpm
+    bpm1 = window.tempo_section.view().candidates[1].bpm
+
+    # Start: cell flips to stop for THIS row only, the design toast fires.
+    _click_hear_cell(qtbot, window, 0)
+    assert ("preview", bpm0) in fake.calls
+    assert fake.playing_bpm == bpm0
+    assert model.index(0, COL_HEAR).data() == STOP_TEXT
+    assert model.index(1, COL_HEAR).data() == HEAR_TEXT
+    assert window.toast.label.text() == mw.hear_toast(bpm0)
+
+    # Same-row click: STOP — cell reverts, and no second toast (start-only).
+    window.toast.hide()
+    _click_hear_cell(qtbot, window, 0)
+    assert fake.calls[-1] == ("stop",)
+    assert fake.playing_bpm is None
+    assert model.index(0, COL_HEAR).data() == HEAR_TEXT
+    assert not window.toast.isVisible()
+
+    # Other-row click while playing: the one engine SWITCHES (D3) — the stop
+    # cell moves with it and the new start gets its own toast.
+    _click_hear_cell(qtbot, window, 0)
+    _click_hear_cell(qtbot, window, 1)
+    assert fake.calls[-1] == ("preview", bpm1)
+    assert fake.playing_bpm == bpm1
+    assert model.index(0, COL_HEAR).data() == HEAR_TEXT
+    assert model.index(1, COL_HEAR).data() == STOP_TEXT
+    assert window.toast.label.text() == mw.hear_toast(bpm1)
+
+
+def test_tiebreak_card_preview_takeover_reverts_hear_cell(window, qtbot, tmp_path):
+    """A tiebreak-card preview takes the one engine over from a table ▶ hear
+    (a pointer swap that never emits ``stopped`` by contract) — the table
+    cell must revert to ▶ hear at the takeover, even when the card's bpm
+    EQUALS the row's (the strictest case: cards and rows share candidate
+    bpms; the cell must not claim a preview the overlay now owns)."""
+    from rai_ui.widgets.candidate_table import COL_HEAR, HEAR_TEXT, STOP_TEXT
+
+    fake = window.click_preview
+    window.show()
+    wav = _write_drill(tmp_path, 140.0)
+    _analyze(window, qtbot, wav)
+    assert window.session.verdict_state.kind is VerdictKind.AMBIGUOUS
+
+    pane = window.tempo_section.candidates
+    model = pane.model
+    bpm0 = window.tempo_section.view().candidates[0].bpm
+
+    _click_hear_cell(qtbot, window, 0)
+    assert model.index(0, COL_HEAR).data() == STOP_TEXT
+
+    pane.tiebreak_button.click()  # overlay opens; playback keeps running
+    overlay = pane.tiebreak
+    assert overlay.isVisible()
+    overlay.cards[0].preview_button.click()  # card 0 = the SAME bpm as row 0
+    assert fake.playing_bpm == bpm0  # the engine plays on (pointer swap)…
+    assert model.index(0, COL_HEAR).data() == HEAR_TEXT  # …overlay-owned now
+    assert model.playing_bpm is None
+
+
+def test_service_stopped_signal_reverts_hear_cell(
+    window_real_preview, qtbot, tmp_path
+):
+    """Natural EOF in the REAL ClickPreview (fake stream) → ``stopped`` →
+    the hear cell reverts from ⏸ stop to ▶ hear — the cell follows the
+    SERVICE, not click bookkeeping (R-M3-21 / landmine 20) — and the next
+    click STARTS fresh instead of dead-toggling."""
+    import numpy as np
+
+    from rai_ui.widgets.candidate_table import COL_HEAR, HEAR_TEXT, STOP_TEXT
+
+    window = window_real_preview
+    engine = window.click_preview
+    window.show()
+    wav = _write_drill(tmp_path, 140.0)
+    _analyze(window, qtbot, wav)
+
+    model = window.tempo_section.candidates.model
+    bpm0 = window.tempo_section.view().candidates[0].bpm
+
+    _click_hear_cell(qtbot, window, 0)
+    assert engine.playing_bpm == bpm0
+    assert model.index(0, COL_HEAR).data() == STOP_TEXT
+
+    # Natural EOF: drain the premix in one audio-callback fill (flag only) …
+    with engine._lock:
+        frames, channels = engine._buffer.shape
+    scratch = np.zeros((frames + 16, channels), dtype=np.float32)
+    assert engine._fill(scratch, frames + 16) is True
+    # … and the main-thread poll delivers exactly one ``stopped``.
+    with qtbot.waitSignal(engine.stopped, timeout=1000):
+        engine._poll_playback()
+
+    assert model.index(0, COL_HEAR).data() == HEAR_TEXT
+    assert model.playing_bpm is None
+
+    # Never a dead click: the next press STARTS playback and re-flips the cell.
+    _click_hear_cell(qtbot, window, 0)
+    assert engine.playing_bpm == bpm0
+    assert model.index(0, COL_HEAR).data() == STOP_TEXT
+
+
+# ---------------------------------------------------------------------------
 # Analysis ⇄ relearn mutual exclusion (review finding 18 — load-bearing)
 # ---------------------------------------------------------------------------
 

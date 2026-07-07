@@ -98,6 +98,12 @@ class TempoSection(QWidget):
         the caller enforces R-M3-6; confirmed state has no entry point)."""
         self.candidates.open_tiebreak()
 
+    def set_playing_bpm(self, bpm: float | None) -> None:
+        """R-M3-21 pass-through: mark the candidate row whose click grid is
+        audibly playing (⏸ stop cell), or ``None`` to revert all cells to
+        ▶ hear. MainWindow drives this from the click service's truth."""
+        self.candidates.set_playing_bpm(bpm)
+
     def close_tiebreak(self) -> None:
         """Dismiss the overlay if open (preview stops, selection survives)."""
         self.candidates.close_tiebreak()

@@ -21,11 +21,25 @@ design's own Qt guidance, fixed by M0). Chips are **delegate-painted**, not
   row's raised surface and the hover wash would need per-widget background
   coordination; painting inline keeps the row a single composition.
 
-The ``▶ hear`` cell is likewise delegate-painted (the ▶ is a drawn
-``glyph_icon``, never a font glyph — P3 rule) and clicks are routed through
+The ``▶ hear`` cell is likewise delegate-painted (the ▶/⏸ are drawn
+``glyph_icon``s, never font glyphs — P3 rule) and clicks are routed through
 the view's ``clicked`` signal; as of M3 the action is live: MainWindow
 answers ``hear_requested`` with the shared click-preview engine plus the
 verbatim design toast (R-M3-10).
+
+R-M3-21 — the hear cell is a truthful toggle pair. The model carries ONE
+``playing bpm`` (``set_playing_bpm``, exact-float keyed — the same
+view-model float flows to the click service's cache keys, so ``==`` is the
+documented equality); the row whose bpm matches renders ``⏸ stop`` in the
+cell's accent treatment (the hover palette, calm — no pulsing dot at 24px;
+that pulse belongs to the tiebreak card's 28px previewing button), every
+other row keeps ``▶ hear``. The state follows the SERVICE, not click
+bookkeeping: MainWindow sets it from ``ClickPreview.playing_bpm`` after each
+toggle, clears it on the engine's ``stopped`` signal (natural EOF, device
+death, external stop) and when a tiebreak-card preview takes the engine
+over. ``set_rows`` deliberately PRESERVES the playing bpm — a same-analysis
+re-render (e.g. an undo while a hear preview keeps playing) must not blank a
+truthful stop cell; rows that no longer carry the bpm simply render ▶ hear.
 
 Sizes are pinned widget-level per Landmine 6; the theme QSS
 (``QFrame#candidatePane`` / ``QTableView#candidateTable``) owns surfaces and
@@ -117,6 +131,7 @@ def content_rect(rect: QRect, column: int) -> QRect:
     return rect.adjusted(_CELL_PAD_X, 0, -trailing, 0)
 
 HEAR_TEXT = "▶ hear"  # verbatim copy (model/accessibility); ▶ is drawn in paint
+STOP_TEXT = "⏸ stop"  # playing-row copy (R-M3-21); ⏸ is drawn in paint
 _HEAR_BUTTON_HEIGHT = 24  # size.hit-min
 _HEAR_ICON_PX = 10
 _HEAR_GAP = 5
@@ -129,6 +144,9 @@ EMPTY_TEXT_PREFIX = "no candidates"
 
 # The whole CandidateRowView, for the delegate and for tests.
 ROW_ROLE = Qt.ItemDataRole.UserRole + 1
+# True on the row whose grid is audibly playing (R-M3-21) — the delegate's
+# stop-state test, derived in the model from the one playing bpm.
+PLAYING_ROLE = Qt.ItemDataRole.UserRole + 2
 
 _PAGE_TABLE, _PAGE_EMPTY, _PAGE_SKELETON = range(3)
 
@@ -143,11 +161,43 @@ class CandidateModel(QAbstractTableModel):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._rows: tuple[CandidateRowView, ...] = ()
+        self._playing_bpm: float | None = None
 
     def set_rows(self, rows: tuple[CandidateRowView, ...]) -> None:
+        # The playing bpm deliberately SURVIVES the reset (R-M3-21, module
+        # docstring): a re-render of the same analysis while the hear preview
+        # keeps playing must keep the stop cell truthful.
         self.beginResetModel()
         self._rows = tuple(rows)
         self.endResetModel()
+
+    @property
+    def playing_bpm(self) -> float | None:
+        """The bpm whose row renders ⏸ stop, or None (test/introspection)."""
+        return self._playing_bpm
+
+    def set_playing_bpm(self, bpm: float | None) -> None:
+        """Mark the row whose click grid is audibly playing (R-M3-21).
+
+        ``None`` reverts every cell to ▶ hear. Equality is EXACT float
+        equality — the same view-model float flows to the click service (its
+        cache keys are ``float(bpm)``) and back here, so ``==`` is the one
+        documented comparison; no tolerance, ever. Repaints ONLY the hear
+        cells that actually changed (the old and new playing rows).
+        """
+        new = None if bpm is None else float(bpm)
+        if new == self._playing_bpm:
+            return
+        old = self._playing_bpm
+        self._playing_bpm = new
+        roles = [Qt.ItemDataRole.DisplayRole, PLAYING_ROLE]
+        for value in (old, new):
+            if value is None:
+                continue
+            for row_index, row in enumerate(self._rows):
+                if row.bpm == value:
+                    index = self.index(row_index, COL_HEAR)
+                    self.dataChanged.emit(index, index, roles)
 
     # -- QAbstractTableModel ------------------------------------------------
 
@@ -163,14 +213,18 @@ class CandidateModel(QAbstractTableModel):
         row = self._rows[index.row()]
         if role == ROW_ROLE:
             return row
+        if role == PLAYING_ROLE:
+            # Exact float equality — the documented comparison (R-M3-21).
+            return self._playing_bpm is not None and row.bpm == self._playing_bpm
         if role == Qt.ItemDataRole.DisplayRole:
+            playing = self._playing_bpm is not None and row.bpm == self._playing_bpm
             return {
                 COL_BPM: row.bpm_text,
                 COL_RELATION: row.chip.text,
                 COL_SALIENCE_BAR: None,  # pure paint, no text
                 COL_SALIENCE: row.salience_text,
                 COL_SCORE: row.score_text,
-                COL_HEAR: HEAR_TEXT,
+                COL_HEAR: STOP_TEXT if playing else HEAR_TEXT,
             }[index.column()]
         return None
 
@@ -198,10 +252,13 @@ class CandidateRowDelegate(QStyledItemDelegate):
         super().__init__(view)
         self._view = view
         self._hover_row = -1
-        # Cached drawn ▶ icons (P3: never a font glyph) in both button states.
-        # token: color.text.secondary / color.accent.base
+        # Cached drawn ▶/⏸ icons (P3: never a font glyph) for every button
+        # state. token: color.text.secondary / color.accent.base
         self._play_icon = glyph_icon("play", COLOR_TEXT_SECONDARY)
         self._play_icon_accent = glyph_icon("play", COLOR_ACCENT_BASE)
+        # The playing row's ⏸ (R-M3-21) — accent, like the tiebreak card's
+        # previewing button (the only other drawn pause in the app).
+        self._pause_icon_accent = glyph_icon("pause", COLOR_ACCENT_BASE)
         self._bpm_font = mono_font(15, QFont.Weight.DemiBold)
         self._salience_font = mono_font(11)
         self._score_font = mono_font(12)
@@ -264,7 +321,8 @@ class CandidateRowDelegate(QStyledItemDelegate):
             )
         elif column == COL_HEAR:
             hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
-            self._paint_hear_button(painter, inner, hovered)
+            playing = bool(index.data(PLAYING_ROLE))
+            self._paint_hear_button(painter, inner, hovered, playing)
         painter.restore()
 
     def _paint_row_background(
@@ -316,7 +374,9 @@ class CandidateRowDelegate(QStyledItemDelegate):
             painter.setBrush(QColor(COLOR_PLOT_DATA_A))
             painter.drawRoundedRect(fill, 3, 3)
 
-    def _paint_hear_button(self, painter: QPainter, inner: QRect, hovered: bool) -> None:
+    def _paint_hear_button(
+        self, painter: QPainter, inner: QRect, hovered: bool, playing: bool
+    ) -> None:
         button = QRect(
             inner.left(),
             inner.center().y() - _HEAR_BUTTON_HEIGHT // 2,
@@ -324,24 +384,37 @@ class CandidateRowDelegate(QStyledItemDelegate):
             _HEAR_BUTTON_HEIGHT,
         )
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if hovered:
+        if playing:
+            # R-M3-21: the playing row's ⏸ stop — the cell's own hover-accent
+            # palette, mirroring the tiebreak card's previewing button but
+            # CALM (no pulsing dot; the cell is 24px). Hover adds nothing:
+            # the state already wears the accent.
+            # token: color.accent.bg / color.accent.base
+            painter.setBrush(QColor(COLOR_ACCENT_BG))
+            pen = QPen(QColor(COLOR_ACCENT_BASE))
+            text_color = COLOR_ACCENT_BASE
+            icon = self._pause_icon_accent
+            label = "stop"
+        elif hovered:
             # hover turns it accent (CL:288)
             # token: color.accent.bg / color.accent.base
             painter.setBrush(QColor(COLOR_ACCENT_BG))
             pen = QPen(QColor(COLOR_ACCENT_BASE))
             text_color = COLOR_ACCENT_BASE
             icon = self._play_icon_accent
+            label = "hear"
         else:
             # token: color.border.strong / color.text.secondary
             painter.setBrush(Qt.BrushStyle.NoBrush)
             pen = QPen(QColor(COLOR_BORDER_STRONG))
             text_color = COLOR_TEXT_SECONDARY
             icon = self._play_icon
+            label = "hear"
         pen.setWidthF(1.0)
         painter.setPen(pen)
         painter.drawRoundedRect(button.adjusted(0, 0, -1, -1), 5, 5)
 
-        text_width = QFontMetrics(self._hear_font).horizontalAdvance("hear")
+        text_width = QFontMetrics(self._hear_font).horizontalAdvance(label)
         group_width = _HEAR_ICON_PX + _HEAR_GAP + text_width
         x = button.center().x() - group_width // 2
         icon_rect = QRect(
@@ -353,7 +426,7 @@ class CandidateRowDelegate(QStyledItemDelegate):
         painter.drawText(
             QRect(x + _HEAR_ICON_PX + _HEAR_GAP, button.top(), text_width + 2, button.height()),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            "hear",
+            label,
         )
 
 
@@ -674,6 +747,14 @@ class CandidatePane(QFrame):
         """Skeleton bars while an analysis runs; back to rows/empty after."""
         self._working = bool(active)
         self._refresh_body()
+
+    def set_playing_bpm(self, bpm: float | None) -> None:
+        """R-M3-21: mark the row whose click grid is audibly playing (its
+        hear cell renders ⏸ stop), or ``None`` to revert every cell to
+        ▶ hear. Forwards to the model, which repaints just the changed hear
+        cells. MainWindow drives this from the SERVICE's truth (post-toggle
+        ``playing_bpm``, the ``stopped`` signal, tiebreak-preview takeover)."""
+        self.model.set_playing_bpm(bpm)
 
     def open_tiebreak(self) -> None:
         """Raise the C-14 overlay over the whole pane (MainWindow calls this

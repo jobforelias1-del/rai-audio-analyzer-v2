@@ -253,20 +253,44 @@ def test_tiebreak_entry_is_ambiguous_only(window, qtbot):
     assert not window.tempo_section.candidates.tiebreak.isVisible()
 
 
+class _FakeHearPreview:
+    """The ClickPreview API the hear wiring consults — toggle semantics and
+    the read-back ``playing_bpm`` truth (R-M3-21), recording calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+        self._playing: float | None = None
+
+    def preview(self, bpm) -> None:
+        self.calls.append(("preview", float(bpm)))
+        self._playing = float(bpm)
+
+    def toggle(self, bpm) -> None:
+        if self._playing is not None and float(bpm) == self._playing:
+            self.stop()
+        else:
+            self.preview(bpm)
+
+    def stop(self) -> None:
+        self.calls.append(("stop",))
+        self._playing = None
+
+    def clear(self) -> None:
+        self._playing = None
+
+    def set_source(self, features, signal_obj) -> None:
+        pass
+
+    @property
+    def playing_bpm(self):
+        return self._playing
+
+
 def test_hear_requested_fires_design_toast_and_click_service(window, qtbot):
     window.show()
     finish_analysis(qtbot, window)
-    calls = []
-    window.click_preview = type(
-        "FakePreview",
-        (),
-        {
-            "preview": lambda self, bpm: calls.append(float(bpm)),
-            "stop": lambda self: None,
-            "clear": lambda self: None,
-            "set_source": lambda self, features, signal_obj: None,
-        },
-    )()
+    fake = _FakeHearPreview()
+    window.click_preview = fake
     # The cell-click → hear_requested path is covered by the table's own
     # tests; here the wiring from the section signal to the toast + click
     # service is what's under test (R-M3-10: the clicked ROW's bpm).
@@ -276,7 +300,73 @@ def test_hear_requested_fires_design_toast_and_click_service(window, qtbot):
         window.toast.label.text()
         == "▶ click-grid preview · 205.15 BPM — audible in the app"
     )
-    assert calls == [205.15]
+    assert fake.calls == [("preview", 205.15)]
+    # R-M3-21: the playing row's cell follows the service's truth.
+    assert window.tempo_section.candidates.model.playing_bpm == 205.15
+
+
+def test_hear_same_row_click_stops_without_a_second_toast(window, qtbot):
+    # R-M3-21 toggle semantics: the second click on the playing row STOPS the
+    # preview, reverts the cell, and fires NO toast (start-only).
+    from rai_ui.widgets.candidate_table import COL_HEAR, HEAR_TEXT, STOP_TEXT
+
+    window.show()
+    finish_analysis(qtbot, window)
+    fake = _FakeHearPreview()
+    window.click_preview = fake
+    model = window.tempo_section.candidates.model
+
+    window.tempo_section.candidates.hear_requested.emit(205.15)
+    assert model.index(0, COL_HEAR).data() == STOP_TEXT
+    window.toast.hide()  # arm the no-second-toast assertion
+
+    window.tempo_section.candidates.hear_requested.emit(205.15)
+    assert fake.calls[-1] == ("stop",)
+    assert fake.playing_bpm is None
+    assert model.index(0, COL_HEAR).data() == HEAR_TEXT
+    assert not window.toast.isVisible()  # the toast fires only on a START
+
+
+def test_hear_other_row_click_switches_the_preview(window, qtbot):
+    # Clicking another row while one plays SWITCHES (one engine, D3) — the
+    # stop cell moves, and the new start gets its own toast.
+    from rai_ui.widgets.candidate_table import COL_HEAR, HEAR_TEXT, STOP_TEXT
+
+    window.show()
+    finish_analysis(qtbot, window)
+    fake = _FakeHearPreview()
+    window.click_preview = fake
+    model = window.tempo_section.candidates.model
+    second = window.tempo_section.view().candidates[1].bpm
+
+    window.tempo_section.candidates.hear_requested.emit(205.15)
+    window.tempo_section.candidates.hear_requested.emit(second)
+    assert fake.calls == [("preview", 205.15), ("preview", second)]
+    assert fake.playing_bpm == second
+    assert model.index(0, COL_HEAR).data() == HEAR_TEXT
+    assert model.index(1, COL_HEAR).data() == STOP_TEXT
+    assert window.toast.isVisible()
+    assert f"{second:.2f} BPM" in window.toast.label.text()
+
+
+def test_hear_dead_device_start_gets_no_toast_and_no_stop_cell(window, qtbot):
+    # Truthfulness: a start the service could not deliver (no device / no
+    # source — preview no-ops with a log) must not toast "audible in the
+    # app" and must not paint a ⏸ stop cell.
+    from rai_ui.widgets.candidate_table import COL_HEAR, HEAR_TEXT
+
+    class _DeadPreview(_FakeHearPreview):
+        def preview(self, bpm) -> None:  # the no-op degradation path
+            self.calls.append(("preview", float(bpm)))
+
+    window.show()
+    finish_analysis(qtbot, window)
+    window.click_preview = _DeadPreview()
+    window.tempo_section.candidates.hear_requested.emit(205.15)
+    assert not window.toast.isVisible()
+    model = window.tempo_section.candidates.model
+    assert model.index(0, COL_HEAR).data() == HEAR_TEXT
+    assert model.playing_bpm is None
 
 
 def test_undo_reverts_confirmation_and_toasts(window, qtbot):
