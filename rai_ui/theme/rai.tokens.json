@@ -1,8 +1,8 @@
 {
   "$meta": {
     "name": "RAI Design Tokens",
-    "version": "0.1.1",
-    "date": "2026-07-06",
+    "version": "0.1.2",
+    "date": "2026-07-07",
     "theme": "dark (v3 default and only)",
     "targets": ["Qt 6 / PySide6 QSS", "pyqtgraph"],
     "notes": [
@@ -53,6 +53,7 @@
       },
       "ambiguous": {
         "base":   { "value": "#E4574D", "use": "verdict Ambiguous — human tiebreak" },
+        "hover":  { "value": "#EC6A60", "use": "hover on red tiebreak actions — design's own documented v0.1.2 punch-list value" },
         "bg":     { "value": "#341413" },
         "border": { "value": "#6E2722" },
         "text":   { "value": "#F49A93" },
@@ -76,7 +77,8 @@
       "data-a-fill": { "value": "#123038", "use": "solid area fill under data-a" },
       "data-b":      { "value": "#E87BAF", "use": "Compare track B" },
       "data-b-fill": { "value": "#3A1B2B" },
-      "band":        { "value": "#151B22", "use": "genre-band region on tempogram (solid, under curve)" }
+      "band":        { "value": "#151B22", "use": "genre-band region on tempogram (solid, under curve)" },
+      "band-edge":   { "value": "#1F2731", "use": "1px left/right edge lines bounding the genre-band region — design's own documented v0.1.2 punch-list value" }
     }
   },
 

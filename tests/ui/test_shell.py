@@ -14,6 +14,7 @@ pytest.importorskip("pytestqt")
 from PySide6.QtCore import QMimeData, QPoint, QPointF, QSettings, Qt, QUrl, qInstallMessageHandler
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 
+TEMPO_PAGE = 2  # hero=0, Overview=1, Tempo=2 (real section as of M1)
 REPORT_PAGE = 5  # hero=0, Overview..Compare=1..4, Report=5
 
 
@@ -45,7 +46,9 @@ def make_fake_result(path="/tmp/beat.wav", bpm=150.0):
 
 @pytest.fixture
 def window(qtbot, tmp_path, monkeypatch):
-    # Keep recent-files writes out of the user's real preferences.
+    # Keep recent-files and UI-pref (rail mode) reads/writes out of the
+    # user's real preferences.
+    import rai_ui.main_window as mw
     from rai_ui.services import recent_files
 
     monkeypatch.setattr(
@@ -53,9 +56,13 @@ def window(qtbot, tmp_path, monkeypatch):
         "_settings",
         lambda: QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat),
     )
-    from rai_ui.main_window import MainWindow
+    monkeypatch.setattr(
+        mw,
+        "_ui_settings",
+        lambda: QSettings(str(tmp_path / "ui.ini"), QSettings.Format.IniFormat),
+    )
 
-    win = MainWindow()
+    win = mw.MainWindow()
     qtbot.addWidget(win)
     return win
 
@@ -144,18 +151,31 @@ def test_drag_of_non_audio_is_rejected(window):
     assert not enter.isAccepted()
 
 
-def test_result_updates_chrome_and_switches_to_report(window, qtbot):
+def test_result_updates_chrome_and_lands_on_tempo(window, qtbot):
     result = make_fake_result()
     with qtbot.waitSignal(window.session.result_ready):
         window.session.finish(result, None, None, 1.23)
 
-    assert window.stack.currentIndex() == REPORT_PAGE
+    # A fresh result lands on the Tempo section (ruling R7), not Report.
+    assert window.stack.currentIndex() == TEMPO_PAGE
     assert window.session.analysis_seconds == pytest.approx(1.23)
     assert window.header.file_name_label.text() == "beat.wav"
     assert "44.1 kHz" in window.header.file_meta_label.text()
     assert "stereo" in window.header.file_meta_label.text()
     assert "analysis 1.2 s" in window.status.left_label.text()
+    # Report stays one click away and renders the result byte-verbatim.
+    window.nav.button("Report").click()
+    assert window.stack.currentIndex() == REPORT_PAGE
     assert window.report_section.text_edit.toPlainText() == result.to_report()
+
+
+def test_tempo_placeholder_replaced_by_real_section(window):
+    from rai_ui.sections.tempo import TempoSection
+
+    # Tempo is a real section as of M1; the other placeholders remain honest.
+    assert set(window._placeholders) == {"Overview", "Signal", "Compare"}
+    assert isinstance(window.stack.widget(TEMPO_PAGE), TempoSection)
+    assert window.stack.widget(TEMPO_PAGE) is window.tempo_section
 
 
 def test_failure_shows_toast_not_modal(window, qtbot):

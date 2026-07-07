@@ -10,7 +10,9 @@
  * are written as computed radii — a 24px-tall chip gets 12px corners — and
  * the generator hard-fails on any emitted radius above 24px.
  *
- * Scope: M0 widgets only, selected via objectName or dynamic properties.
+ * Scope: M0 shell widgets + the M1 Tempo lane, selected via objectName or
+ * dynamic properties. Widget-level setStyleSheet pins remain the norm for
+ * fixed sizes (heights are content-box — Landmine 6).
  */
 
 /* ---- canvas + base type ------------------------------------------------ */
@@ -221,4 +223,120 @@ QFrame[role="toast"] {
     background-color: {color.surface.overlay};
     border: {line.hairline}px solid {color.border.hairline};
     border-radius: {radius.md}px;
+}
+
+/* ---- M1 tempo lane ----------------------------------------------------------
+ * Object names are a shared contract with the tempo widgets (C-16 tempogram,
+ * C-13 candidate table, C-05 verdict block, C-07 rail, C-02 bridge). QSS owns
+ * surfaces/borders/colors only; fixed sizes (rail 236, bridge 76, row 40,
+ * button heights) are pinned widget-level per Landmine 6.
+ */
+
+/* C-16 tempogram well: plot bed on surface.inset in a radius.lg frame */
+QFrame#tempogramPane {
+    background-color: {color.surface.inset};
+    border: {line.hairline}px solid {color.border.hairline};
+    border-radius: {radius.lg}px;
+}
+
+/* C-13 candidates card */
+QFrame#candidatePane {
+    background-color: {color.surface.panel};
+    border: {line.hairline}px solid {color.border.hairline};
+    border-radius: {radius.lg}px;
+}
+
+/* The QTableView inside the candidates card draws rows via delegates; the
+ * view itself stays chromeless so the card provides the only surface. */
+QTableView#candidateTable {
+    background-color: transparent;
+    border: none;
+    outline: 0;
+    selection-background-color: transparent;
+}
+
+QTableView#candidateTable QHeaderView::section {
+    background-color: transparent;
+    color: {color.text.muted};
+    border: none;
+    /* table header rule (border.strong per tokens) */
+    border-bottom: {line.hairline}px solid {color.border.strong};
+    padding: 0 10px 6px 10px;
+    /* label style renders 11px in practice (design recon); Qt QSS has no
+     * text-transform, so header text is pre-uppercased in the model */
+    font-size: {type.scale.caption.size}px;
+    font-weight: {type.weight.medium};
+}
+
+/* C-05 verdict block — the [verdict=...] dynamic property swaps the state
+ * skin. Setters must re-polish after changing the property
+ * (style().unpolish(w); style().polish(w)) or the swap will not repaint.
+ * "error" has no design card of its own: it sits on the neutral surface
+ * (never red panels — ambiguous is a crafted state, not error styling, and
+ * the reverse holds too); the word color is the widget's job. */
+QFrame#verdictBlock {
+    border-radius: {radius.md}px;
+}
+
+QFrame#verdictBlock[verdict="confident"],
+QFrame#verdictBlock[verdict="confirmed"] {
+    background-color: {color.semantic.confident.bg};
+    border: {line.hairline}px solid {color.semantic.confident.border};
+}
+
+QFrame#verdictBlock[verdict="ambiguous"] {
+    background-color: {color.semantic.ambiguous.bg};
+    border: {line.hairline}px solid {color.semantic.ambiguous.border};
+}
+
+QFrame#verdictBlock[verdict="neutral"],
+QFrame#verdictBlock[verdict="working"],
+QFrame#verdictBlock[verdict="error"] {
+    background-color: {color.surface.raised};
+    border: {line.hairline}px solid {color.border.hairline};
+}
+
+/* C-07 persistent readout rail (fixed width 236 pinned widget-level) */
+QFrame#metricRail {
+    background-color: {color.surface.panel};
+    border-left: {line.hairline}px solid {color.border.hairline};
+}
+
+/* C-02 collapsed meter bridge (fixed height 76 pinned widget-level) */
+QFrame#meterBridge {
+    background-color: {color.surface.panel};
+    border-bottom: {line.hairline}px solid {color.border.hairline};
+}
+
+/* C-18 recent-file pill chips (h24 pinned widget-level; pill radius = 12) */
+QPushButton#recentPill {
+    background-color: {color.surface.panel};
+    color: {color.text.secondary};
+    border: {line.hairline}px solid {color.border.hairline};
+    border-radius: 12px;
+    padding: 0 {space.scale.3}px;
+    font-family: "IBM Plex Mono";
+    font-size: {type.scale.caption.size}px;
+}
+
+QPushButton#recentPill:hover {
+    background-color: {color.surface.hover};
+}
+
+/* C-10 red tiebreak action — exists ONLY inside ambiguous contexts. Base
+ * skin matches the rail/bridge docked buttons (radius 5 is the approved
+ * screens' literal value — between radius.sm and radius.md by design); the
+ * candidates-header variant pins its own radius 7 / 13px widget-level. */
+QPushButton#tiebreakButton {
+    background-color: {color.semantic.ambiguous.base};
+    color: {color.semantic.ambiguous.on};
+    border: none;
+    border-radius: 5px;
+    padding: 0 {space.scale.3}px;
+    font-size: {type.scale.label.size}px;
+    font-weight: {type.weight.semibold};
+}
+
+QPushButton#tiebreakButton:hover {
+    background-color: {color.semantic.ambiguous.hover};
 }

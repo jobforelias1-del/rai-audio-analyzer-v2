@@ -8,7 +8,16 @@ rai_ui.theme.pens never drags in PySide6 (test collection without Qt).
 
 from __future__ import annotations
 
+from rai_ui.theme._tokens_gen import COLOR_PLOT_BAND_EDGE, LINE_HAIRLINE
+
 _STYLES = ("solid", "dash")
+
+# The acceptance band's left/right 1px edge lines (C-16). Defined here rather
+# than in the generated module because the generator's pen table is reserved
+# for data/marker pens; the color still traces to the tokens by constant so it
+# cannot drift. Cosmetic like every plot pen (see qpen).
+# token: color.plot.band-edge · line.hairline
+PEN_BAND_EDGE = (COLOR_PLOT_BAND_EDGE, float(LINE_HAIRLINE), "solid", None)
 
 
 def qpen(spec: tuple):

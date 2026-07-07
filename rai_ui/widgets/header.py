@@ -6,24 +6,30 @@ nothing here touches window chrome.
 
 The file chip has two states: a dashed "no file loaded" placeholder before the
 first analysis, and ``name  duration · sr · channels`` after (values straight
-off the AnalysisResult). The genre chip is static in M0 (profile selection is
-an M1 feature); the rail toggle ships disabled with an honest tooltip.
+off the AnalysisResult). The genre chip is static (profile switching is a
+later milestone). The rail toggle is live as of M1: it requests the
+rail⇄bridge swap (MainWindow owns the mode and its QSettings persistence —
+ruling R10) and ``set_rail_collapsed`` keeps its tooltip honest about which
+way the next click goes.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QToolButton
 
+from rai_ui.theme.icons import glyph_icon
 from rai_ui.widgets import mono_font, token
 
 HEADER_HEIGHT = int(token("size.header"))  # 48
 _GAP = int(token("space.scale.3"))  # 12
 
 NO_FILE_TEXT = "no file loaded"
-RAIL_TOOLTIP = "rail arrives in M1"
-GENRE_CHIP_TEXT = "DRILL · 140–170"  # static in M0; profile switching is M1
+# Rail⇄bridge toggle tooltips — verbatim from the approved Console (CO:57-64).
+RAIL_TOOLTIP_COLLAPSE = "Collapse readout to meter bridge"
+RAIL_TOOLTIP_EXPAND = "Expand meter bridge to readout rail"
+GENRE_CHIP_TEXT = "DRILL · 140–170"  # static; profile switching is a later milestone
 
 
 def _channels_word(channels: int) -> str:
@@ -114,19 +120,40 @@ class HeaderBar(QFrame):
         self.browse_button.clicked.connect(self.browse_requested.emit)
         layout.addWidget(self.browse_button)
 
+        # Rail⇄bridge toggle (C-01): 30×30 bordered icon button, live in M1.
+        # MainWindow connects `clicked` and calls set_rail_collapsed back so
+        # the tooltip always names the NEXT state.
         self.rail_toggle = QToolButton(self)
-        self.rail_toggle.setText("▤")
-        self.rail_toggle.setEnabled(False)
-        self.rail_toggle.setToolTip(RAIL_TOOLTIP)
-        self.rail_toggle.setProperty("variant", "ghost")
-        # The theme has no QToolButton ghost rule (only nav buttons), so a
-        # bare toolbutton renders as a native light box on the dark header.
+        self.rail_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.rail_toggle.setFixedSize(30, 30)  # size.control-m icon button
+        self.rail_toggle.setIconSize(QSize(17, 17))  # native icon grid
+        # The theme has no QToolButton rule for the header, so pin the C-01
+        # skin widget-level (border.strong box, radius.md, hover wash).
         self.rail_toggle.setStyleSheet(
-            "QToolButton { background: transparent; border: none;"
-            f" color: {token('color.text.muted')}; }}"
-            f"QToolButton:disabled {{ color: {token('color.text.disabled')}; }}"
+            "QToolButton { background: transparent;"
+            f" border: 1px solid {token('color.border.strong')};"
+            f" border-radius: {token('radius.md')}px;"
+            f" color: {token('color.text.secondary')}; }}"
+            f"QToolButton:hover {{ background: {token('color.surface.hover')}; }}"
         )
+        self.set_rail_collapsed(False)
         layout.addWidget(self.rail_toggle)
+
+    # -- rail toggle state ----------------------------------------------------
+
+    def set_rail_collapsed(self, collapsed: bool) -> None:
+        """Reflect the current rail⇄bridge mode on the toggle's tooltip/icon.
+
+        The icon shows the CURRENT mode (drawn glyphs — the ▤ text glyph is
+        not in the vendored Plex faces and would render via OS fallback):
+        rail visible → right column filled; bridge → top strip filled.
+        """
+        self.rail_toggle.setToolTip(
+            RAIL_TOOLTIP_EXPAND if collapsed else RAIL_TOOLTIP_COLLAPSE
+        )
+        self.rail_toggle.setIcon(
+            glyph_icon("expand" if collapsed else "collapse", token("color.text.secondary"))
+        )
 
     # -- file chip states ---------------------------------------------------
 

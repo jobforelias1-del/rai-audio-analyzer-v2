@@ -64,6 +64,7 @@ def run_smoke(args) -> int:
         "analysis_ok": False,
         "bpm": None,
         "ambiguous": None,
+        "tempo_ok": None,
         "seconds": None,
         "audio_ok": None,
         "commit": _commit(),
@@ -172,6 +173,15 @@ def _probe(report: dict, want_audio: bool) -> int:
             report["analysis_ok"] = True
             report["bpm"] = round(float(result.tempo.primary_bpm), 2)
             report["ambiguous"] = bool(result.tempo.ambiguous)
+            # M1 additive check: the Tempo section actually rendered the
+            # result — at least one plot marker and one candidate table row.
+            # ADDITIVE key: build/smoke_frozen.sh's check_json reads only the
+            # keys it knows, so older tooling tolerates this one.
+            vm = window.tempo_section.view()
+            report["tempo_ok"] = bool(
+                len(vm.markers) >= 1
+                and window.tempo_section.candidates.model.rowCount() >= 1
+            )
         elif "error" in outcome:
             report["analysis_error"] = outcome["error"]
         elif timed_out:

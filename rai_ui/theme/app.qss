@@ -10,7 +10,9 @@
  * are written as computed radii — a 24px-tall chip gets 12px corners — and
  * the generator hard-fails on any emitted radius above 24px.
  *
- * Scope: M0 widgets only, selected via objectName or dynamic properties.
+ * Scope: M0 shell widgets + the M1 Tempo lane, selected via objectName or
+ * dynamic properties. Widget-level setStyleSheet pins remain the norm for
+ * fixed sizes (heights are content-box — Landmine 6).
  */
 
 /* ---- canvas + base type ------------------------------------------------ */
@@ -221,4 +223,120 @@ QFrame[role="toast"] {
     background-color: #1F262E;
     border: 1px solid #242B34;
     border-radius: 7px;
+}
+
+/* ---- M1 tempo lane ----------------------------------------------------------
+ * Object names are a shared contract with the tempo widgets (C-16 tempogram,
+ * C-13 candidate table, C-05 verdict block, C-07 rail, C-02 bridge). QSS owns
+ * surfaces/borders/colors only; fixed sizes (rail 236, bridge 76, row 40,
+ * button heights) are pinned widget-level per Landmine 6.
+ */
+
+/* C-16 tempogram well: plot bed on surface.inset in a radius.lg frame */
+QFrame#tempogramPane {
+    background-color: #090B0D;
+    border: 1px solid #242B34;
+    border-radius: 12px;
+}
+
+/* C-13 candidates card */
+QFrame#candidatePane {
+    background-color: #12161B;
+    border: 1px solid #242B34;
+    border-radius: 12px;
+}
+
+/* The QTableView inside the candidates card draws rows via delegates; the
+ * view itself stays chromeless so the card provides the only surface. */
+QTableView#candidateTable {
+    background-color: transparent;
+    border: none;
+    outline: 0;
+    selection-background-color: transparent;
+}
+
+QTableView#candidateTable QHeaderView::section {
+    background-color: transparent;
+    color: #7E8896;
+    border: none;
+    /* table header rule (border.strong per tokens) */
+    border-bottom: 1px solid #333D49;
+    padding: 0 10px 6px 10px;
+    /* label style renders 11px in practice (design recon); Qt QSS has no
+     * text-transform, so header text is pre-uppercased in the model */
+    font-size: 11px;
+    font-weight: 500;
+}
+
+/* C-05 verdict block — the [verdict=...] dynamic property swaps the state
+ * skin. Setters must re-polish after changing the property
+ * (style().unpolish(w); style().polish(w)) or the swap will not repaint.
+ * "error" has no design card of its own: it sits on the neutral surface
+ * (never red panels — ambiguous is a crafted state, not error styling, and
+ * the reverse holds too); the word color is the widget's job. */
+QFrame#verdictBlock {
+    border-radius: 7px;
+}
+
+QFrame#verdictBlock[verdict="confident"],
+QFrame#verdictBlock[verdict="confirmed"] {
+    background-color: #0E2D1D;
+    border: 1px solid #1C5638;
+}
+
+QFrame#verdictBlock[verdict="ambiguous"] {
+    background-color: #341413;
+    border: 1px solid #6E2722;
+}
+
+QFrame#verdictBlock[verdict="neutral"],
+QFrame#verdictBlock[verdict="working"],
+QFrame#verdictBlock[verdict="error"] {
+    background-color: #181D24;
+    border: 1px solid #242B34;
+}
+
+/* C-07 persistent readout rail (fixed width 236 pinned widget-level) */
+QFrame#metricRail {
+    background-color: #12161B;
+    border-left: 1px solid #242B34;
+}
+
+/* C-02 collapsed meter bridge (fixed height 76 pinned widget-level) */
+QFrame#meterBridge {
+    background-color: #12161B;
+    border-bottom: 1px solid #242B34;
+}
+
+/* C-18 recent-file pill chips (h24 pinned widget-level; pill radius = 12) */
+QPushButton#recentPill {
+    background-color: #12161B;
+    color: #A8B2BF;
+    border: 1px solid #242B34;
+    border-radius: 12px;
+    padding: 0 12px;
+    font-family: "IBM Plex Mono";
+    font-size: 11px;
+}
+
+QPushButton#recentPill:hover {
+    background-color: #1C232B;
+}
+
+/* C-10 red tiebreak action — exists ONLY inside ambiguous contexts. Base
+ * skin matches the rail/bridge docked buttons (radius 5 is the approved
+ * screens' literal value — between radius.sm and radius.md by design); the
+ * candidates-header variant pins its own radius 7 / 13px widget-level. */
+QPushButton#tiebreakButton {
+    background-color: #E4574D;
+    color: #1C0806;
+    border: none;
+    border-radius: 5px;
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QPushButton#tiebreakButton:hover {
+    background-color: #EC6A60;
 }

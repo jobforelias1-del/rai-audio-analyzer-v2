@@ -52,3 +52,30 @@ def mono_font(pixel_size: int, weight: QFont.Weight = QFont.Weight.Normal) -> QF
     font.setPixelSize(pixel_size)
     font.setWeight(weight)
     return font
+
+
+# --- M1 widget surface (re-exports) -----------------------------------------
+# Only the Integrate stage touches package __init__ files (ruling R15). These
+# imports sit BELOW the helper definitions on purpose: the widget modules
+# import ``mono_font``/``ui_font``/``token`` back from this package, so the
+# helpers must already exist on the partially-initialized module when the
+# re-exports execute. Deliberately absent: ``rai_ui.plots.tempogram`` — the
+# plots package __init__ stays import-free (engine CI imports plot math
+# without Qt/pyqtgraph), so the tempogram pane is imported by module path.
+from rai_ui.widgets.candidate_table import CandidatePane  # noqa: E402
+from rai_ui.widgets.chips import HumanPill, RelationshipChip  # noqa: E402
+from rai_ui.widgets.meter_bridge import MeterBridge  # noqa: E402
+from rai_ui.widgets.metric_readout import MetricRail  # noqa: E402
+from rai_ui.widgets.verdict_block import VerdictBlock  # noqa: E402
+
+__all__ = [
+    "token",
+    "ui_font",
+    "mono_font",
+    "CandidatePane",
+    "RelationshipChip",
+    "HumanPill",
+    "MeterBridge",
+    "MetricRail",
+    "VerdictBlock",
+]

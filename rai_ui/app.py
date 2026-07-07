@@ -42,6 +42,15 @@ def create_app(argv: Optional[list] = None) -> QApplication:
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(ORG_NAME)
 
+    # pyqtgraph global config (ruling R9): create_app is the documented single
+    # global-Qt-state site. Antialiased curves, no OpenGL (the frozen bundle
+    # deliberately avoids the GL stack); per-widget backgrounds come from the
+    # design tokens, never from pyqtgraph's global default. Imported lazily so
+    # importing rai_ui.app stays cheap and never hard-requires pyqtgraph.
+    import pyqtgraph as pg
+
+    pg.setConfigOptions(antialias=True, useOpenGL=False)
+
     load_fonts()  # raises RuntimeError in dev if the Plex faces are missing
     app.setFont(QFont(DEFAULT_FONT_FAMILY, DEFAULT_FONT_PT))
     app.setStyleSheet(load_qss())
