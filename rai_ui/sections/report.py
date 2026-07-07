@@ -20,6 +20,7 @@ from PySide6.QtGui import QGuiApplication, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QPushButton, QTextEdit, QVBoxLayout, QWidget
 
 from rai_ui.widgets import mono_font, token
+from rai_ui.widgets.report_banner import ReportBanner
 
 REPORT_FONT_PX = 13
 REPORT_LINE_HEIGHT_PCT = 175.0
@@ -52,6 +53,13 @@ class ReportSection(QWidget):
             toolbar.addWidget(button)
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
+
+        # M4 (R-M4-11): the confirmed-truth banner mounts BETWEEN the toolbar
+        # and the text edit — screen chrome only. The shell drives it
+        # (banner.set_state) off the verdict fan-out; the copyable/exported
+        # to_report() bytes below stay untouched by construction.
+        self.banner = ReportBanner(self)
+        layout.addWidget(self.banner)
 
         self.text_edit = QTextEdit(self)
         self.text_edit.setProperty("role", "report")

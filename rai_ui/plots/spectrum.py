@@ -36,7 +36,7 @@ second grid-colored line at the same place would be a no-op, so no separate
 baseline item exists here (documented divergence from the tempogram, whose
 grid is vertical and therefore needed a dedicated baseline).
 
-The working overlay is the tempogram's ``_WorkingOverlay`` imported directly
+The working overlay is the shared ``WorkingOverlay`` (rai_ui.plots.overlay)
 — C-17 authored exactly one working state and re-implementing it would only
 create drift (same-package reuse; its animation start/stop already follows
 effective visibility, so no timer can leak).
@@ -55,7 +55,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from rai_ui.plots.decimate import minmax_decimate
-from rai_ui.plots.tempogram import _WorkingOverlay
+from rai_ui.plots.overlay import WorkingOverlay
 from rai_ui.state.signal_view import (
     EMPTY_SIGNAL_VIEW,
     SPECTRUM_FLOOR_DB,
@@ -286,7 +286,7 @@ class SpectrumPane(QFrame):
         )
         self._silent_label.hide()
 
-        self._overlay = _WorkingOverlay(self)
+        self._overlay = WorkingOverlay(self)
         self._overlay.hide()
 
         self.set_view(EMPTY_SIGNAL_VIEW)

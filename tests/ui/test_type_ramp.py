@@ -393,6 +393,125 @@ class TestM3PopoverRampUnderRealTheme:
 
 
 # ---------------------------------------------------------------------------
+# M4: Compare + report-banner designed labels (landmine 8 — same real-QSS
+# gate; one pin per new designed family/size/weight combination)
+# ---------------------------------------------------------------------------
+
+
+def _compare_loaded_vm():
+    from rai_ui.state.compare_view import BStatus, build_compare_view
+    from tests.ui.test_compare_view import DEMO_A, DEMO_A_SIG, DEMO_B, DEMO_B_SIG
+
+    return build_compare_view(DEMO_A, DEMO_A_SIG, DEMO_B, DEMO_B_SIG, BStatus.LOADED)
+
+
+def _compare_bempty_vm():
+    from rai_ui.state.compare_view import BStatus, build_compare_view
+    from tests.ui.test_compare_view import DEMO_A, DEMO_A_SIG
+
+    return build_compare_view(DEMO_A, DEMO_A_SIG, None, None, BStatus.EMPTY)
+
+
+class TestM4CompareRampUnderRealTheme:
+    def _table(self):
+        from rai_ui.widgets.compare_table import CompareTable
+
+        table = CompareTable()
+        table.set_rows(_compare_loaded_vm().rows)
+        return table
+
+    def test_table_value_is_mono_14_500(self, themed_app, qtbot):
+        table = self._table()
+        font = _polished_font(themed_app, qtbot, table, table.a_value_labels[0])
+        _assert_type(font, MONO, 14, 500)  # A/B values mono 14/500 (04:473)
+
+    def test_table_delta_is_mono_14_600(self, themed_app, qtbot):
+        table = self._table()
+        font = _polished_font(themed_app, qtbot, table, table.delta_labels[0])
+        _assert_type(font, MONO, 14, 600)  # Δ 14/600 — its ONLY emphasis (C-15)
+
+    def test_table_metric_is_sans_13(self, themed_app, qtbot):
+        table = self._table()
+        font = _polished_font(themed_app, qtbot, table, table.metric_labels[0])
+        _assert_type(font, SANS, 13, 400)  # metric name 13px (04:472)
+
+    def test_table_reading_is_sans_12(self, themed_app, qtbot):
+        # Design 12.5px — floored to 12 (integer QFont px; the C-06 chip
+        # 10.5→10 precedent, queued for design reconciliation).
+        table = self._table()
+        font = _polished_font(themed_app, qtbot, table, table.reading_labels[0])
+        _assert_type(font, SANS, 12, 400)
+
+    def test_table_header_is_sans_11_500(self, themed_app, qtbot):
+        table = self._table()
+        font = _polished_font(themed_app, qtbot, table, table.header_labels[3])
+        _assert_type(font, SANS, 11, 500)  # header label idiom (04:463)
+        assert font.letterSpacing() == pytest.approx(107.0)  # 0.07em
+
+    def test_a_chip_is_mono_12(self, themed_app, qtbot):
+        from rai_ui.widgets.compare_chips import CompareChipRow
+
+        row = CompareChipRow()
+        row.set_view(_compare_loaded_vm())
+        font = _polished_font(themed_app, qtbot, row, row.a_chip)
+        _assert_type(font, MONO, 12, 400)  # identity chip mono 12 (04:449)
+
+    def test_b_loaded_chip_is_mono_12(self, themed_app, qtbot):
+        from rai_ui.widgets.compare_chips import CompareChipRow
+
+        row = CompareChipRow()
+        row.set_view(_compare_loaded_vm())
+        font = _polished_font(themed_app, qtbot, row, row.b_chip.text_label)
+        _assert_type(font, MONO, 12, 400)
+
+    def test_b_empty_chip_is_sans_11(self, themed_app, qtbot):
+        from rai_ui.widgets.compare_chips import CompareChipRow
+
+        row = CompareChipRow()
+        row.set_view(_compare_bempty_vm())
+        font = _polished_font(themed_app, qtbot, row, row.b_chip.text_label)
+        _assert_type(font, SANS, 11, 400)  # dashed browse chip 11px (04:456)
+
+    def test_hint_chip_is_sans_11(self, themed_app, qtbot):
+        from rai_ui.widgets.compare_chips import CompareChipRow
+
+        row = CompareChipRow()
+        row.set_view(_compare_loaded_vm())
+        font = _polished_font(themed_app, qtbot, row, row.hint_chip)
+        _assert_type(font, SANS, 11, 400)  # drop-to-replace hint (04:453)
+
+    def test_overlay_title_is_sans_11_500(self, themed_app, qtbot):
+        from rai_ui.plots.compare_overlay import CompareOverlayPane
+
+        pane = CompareOverlayPane()
+        font = _polished_font(themed_app, qtbot, pane, pane._title)
+        _assert_type(font, SANS, 11, 500)  # pane label idiom (04:481)
+
+    def test_overlay_legend_letter_is_mono_11(self, themed_app, qtbot):
+        from rai_ui.plots.compare_overlay import CompareOverlayPane
+
+        pane = CompareOverlayPane()
+        font = _polished_font(themed_app, qtbot, pane, pane.legend_b_label)
+        _assert_type(font, MONO, 11, 400)  # legend letters mono 11 (04:482)
+
+    def test_overlay_pill_is_sans_12(self, themed_app, qtbot):
+        from rai_ui.plots.compare_overlay import CompareOverlayPane
+
+        pane = CompareOverlayPane()
+        pane.set_view(_compare_bempty_vm())  # pill visible in the B-empty state
+        font = _polished_font(themed_app, qtbot, pane, pane.pill_label)
+        _assert_type(font, SANS, 12, 400)  # pill copy 12px (04:492)
+
+    def test_report_banner_is_mono_12_500(self, themed_app, qtbot):
+        from rai_ui.widgets.report_banner import ReportBanner
+
+        banner = ReportBanner()
+        banner.set_state(155.25)
+        font = _polished_font(themed_app, qtbot, banner, banner.label)
+        _assert_type(font, MONO, 12, 500)  # R-M4-11 banner line
+
+
+# ---------------------------------------------------------------------------
 # CONTROL: bare default — the pins must not regress the unstyled case
 # ---------------------------------------------------------------------------
 

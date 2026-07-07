@@ -37,9 +37,9 @@ a waveform. x is locked 0..1 (fraction of file); bin i of n sits at
 mock's ``i*5`` over a 1000-unit viewBox. All mouse interaction is disabled
 and there is no legend, ever.
 
-The C-17 working overlay is the tempogram's own ``_WorkingOverlay`` —
-imported, not copied, so the sweep/typography/visibility rules have exactly
-one truth.
+The C-17 working overlay is the shared ``WorkingOverlay``
+(rai_ui.plots.overlay) — imported, not copied, so the
+sweep/typography/visibility rules have exactly one truth.
 
 This module imports pyqtgraph at the top (widget layer, same as
 ``tempogram.py``); the pure decimation math lives in
@@ -56,7 +56,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from rai_ui.plots.tempogram import _WorkingOverlay
+from rai_ui.plots.overlay import WorkingOverlay
 from rai_ui.state.signal_view import EMPTY_OVERVIEW_VIEW, OverviewViewModel
 from rai_ui.theme._tokens_gen import (
     COLOR_PLOT_AXIS_TEXT,
@@ -241,8 +241,8 @@ class WaveformPane(QFrame):
         self._zero_line.setZValue(-5)
         self._plot.addItem(self._zero_line)
 
-        # --- shared C-17 working overlay (one truth, owned by tempogram.py) ---
-        self._overlay = _WorkingOverlay(self)
+        # --- shared C-17 working overlay (one truth, rai_ui.plots.overlay) ----
+        self._overlay = WorkingOverlay(self)
         self._overlay.hide()
 
         self.set_view(EMPTY_OVERVIEW_VIEW)

@@ -8,8 +8,15 @@ Composition (M1/M2, normal titled window — no native chrome integration):
     StatusBar                                  (28px, C-04)
 
 Stack pages: 0 = first-run hero (no nav button — unreachable after the first
-result), then the real Overview (M2), Tempo (M1), and Signal (M2) sections,
-the Compare placeholder, then the Report section, in nav order.
+result), then the real Overview (M2), Tempo (M1), Signal (M2), Compare (M4)
+and Report sections, in nav order.
+
+M4 — Compare A/B: drops route by ACTIVE page (R-M4-1 — Compare = B,
+anywhere else = A), the B lane lives in :class:`CompareSlot` (persistent
+reference, R-M4-2; mutually-exclusive with A/relearn, R-M4-3), and
+``_refresh_compare`` joins session A-state with the slot's B-state into ONE
+``build_compare_view`` pass. The Report confirmed-truth line is GUI chrome
+(``ReportBanner``, R-M4-11) — the copyable ``to_report()`` bytes stay frozen.
 
 The readout rail and the meter bridge are MainWindow-level chrome (ruling
 R10): the rail persists across sections and hides only on the hero page; the
@@ -86,6 +93,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from rai_ui.sections.compare import CompareSection
 from rai_ui.sections.overview import OverviewSection
 from rai_ui.sections.placeholder import PlaceholderSection
 from rai_ui.sections.report import ReportSection
@@ -93,6 +101,7 @@ from rai_ui.sections.signal import SignalSection
 from rai_ui.sections.tempo import TempoSection
 from rai_ui.services import recent_files
 from rai_ui.services.click_preview import ClickPreview
+from rai_ui.services.compare_slot import CompareSlot
 from rai_ui.services.relearn import (
     RELEARN_DONE_MESSAGE_FMT,
     RelearnController,
@@ -101,6 +110,7 @@ from rai_ui.services.relearn import (
     revert_profile,
 )
 from rai_ui.services.worker import AnalysisWorker
+from rai_ui.state.compare_view import build_compare_view
 from rai_ui.state.session import SessionState
 from rai_ui.state.verdict import VerdictKind
 from rai_ui.state.signal_view import build_overview_view, build_signal_view
@@ -124,14 +134,13 @@ HERO_PAGE = 0
 OVERVIEW_PAGE = 1 + SECTIONS.index("Overview")
 TEMPO_PAGE = 1 + SECTIONS.index("Tempo")
 SIGNAL_PAGE = 1 + SECTIONS.index("Signal")
+COMPARE_PAGE = 1 + SECTIONS.index("Compare")
 REPORT_PAGE = 1 + SECTIONS.index("Report")
 
 # Placeholder titles per the approved C-18 copy — honest milestone promises.
-# Tempo shipped in M1, Overview/Signal in M2; all three are constructed as
-# real sections below.
-_PLACEHOLDER_TITLES = {
-    "Compare": "A/B compare arrives in M4",
-}
+# Every nav section is a real page as of M4 (Tempo M1, Overview/Signal M2,
+# Compare M4); the machinery stays so a future section fails loudly here.
+_PLACEHOLDER_TITLES: dict[str, str] = {}
 
 # M3 toast copy — verbatim design copy on the single always-neutral slot
 # (R-M3-16; the verdict block is the semantic voice, toasts only confirm).
@@ -154,6 +163,15 @@ TOAST_PROFILE_REVERTED = "Reverted to previous profile"
 # score one verdict against two different profiles (review finding 18).
 TOAST_RELEARN_BLOCKED_BY_ANALYSIS = "Analysis running — relearn once it finishes"
 TOAST_ANALYSIS_BLOCKED_BY_RELEARN = "Relearning — drop ignored until it finishes"
+# M4 Compare lane (R-M4-1/3). The loaded toast is design copy VERBATIM
+# (04:875: '{name} analyzed — reference loaded'); the rest is RC copy in the
+# M3 mutual-exclusion tone (the B-side refusals live in compare_slot). The
+# vice-versa gates below are as load-bearing as the relearn pair: a B worker
+# reads the same path-keyed fingerprint cache (review finding 18).
+TOAST_REFERENCE_LOADED_FMT = "{name} analyzed — reference loaded"
+TOAST_REFERENCE_FAILED_FMT = "Reference analysis failed — {message}"
+TOAST_ANALYSIS_BLOCKED_BY_REFERENCE = "Reference analyzing — drop ignored until it finishes"
+TOAST_RELEARN_BLOCKED_BY_REFERENCE = "Reference analyzing — relearn once it finishes"
 
 
 def hear_toast(bpm: float) -> str:
@@ -203,6 +221,15 @@ class MainWindow(QMainWindow):
         self.click_preview = ClickPreview()
         # Relearn runs on its own QThread via the controller (R-M3-11).
         self.relearn = RelearnController(self)
+        # M4: the persistent Compare B lane (R-M4-2) — its own workers and
+        # generation counter; refuses while A works or a relearn runs
+        # (R-M4-3). The gates are same-thread callables; the relearn probe is
+        # a closure over the attribute so tests can swap the controller.
+        self.compare_slot = CompareSlot(
+            self,
+            a_working=self._analysis_in_flight,
+            relearn_running=lambda: self.relearn.is_running(),
+        )
 
         # -- chrome + stack ---------------------------------------------------
         self.header = HeaderBar(self)
@@ -226,6 +253,9 @@ class MainWindow(QMainWindow):
             elif name == "Signal":
                 self.signal_section = SignalSection(self)
                 self.stack.addWidget(self.signal_section)
+            elif name == "Compare":
+                self.compare_section = CompareSection(self)
+                self.stack.addWidget(self.compare_section)
             else:
                 page = PlaceholderSection(_PLACEHOLDER_TITLES[name], parent=self)
                 self._placeholders[name] = page
@@ -268,6 +298,7 @@ class MainWindow(QMainWindow):
         self.session.working.connect(self.tempo_section.set_working)
         self.session.working.connect(self.overview_section.set_working)
         self.session.working.connect(self.signal_section.set_working)
+        self.session.working.connect(self.compare_section.set_working)
         self.session.working.connect(self._on_working)
         self.session.verdict_changed.connect(self._on_verdict_changed)
         self.session.result_ready.connect(self._on_result_ready)
@@ -286,6 +317,16 @@ class MainWindow(QMainWindow):
         for surface in (self.rail, self.bridge):
             surface.tiebreak_requested.connect(self._on_tiebreak_requested)
             surface.undo_requested.connect(self._on_undo_requested)
+
+        # M4 Compare wiring (R-M4-1/2): the section's user intents resolve
+        # here; the slot's lifecycle feeds the compare refresh + toasts. All
+        # bound-method connections (landmine 2 discipline).
+        self.compare_section.browse_b_requested.connect(self._browse_reference)
+        self.compare_section.clear_b_requested.connect(self._on_clear_reference)
+        self.compare_slot.changed.connect(self._refresh_compare)
+        self.compare_slot.loaded.connect(self._on_reference_loaded)
+        self.compare_slot.failed.connect(self._on_reference_failed)
+        self.compare_slot.profile_fallback.connect(self.toast.show_message)
 
         # Profile popover + relearn (R-M3-11/16).
         self.header.profile_chip_clicked.connect(self._open_profile_popover)
@@ -339,8 +380,33 @@ class MainWindow(QMainWindow):
         if self.relearn.is_running():
             self.toast.show_message(TOAST_ANALYSIS_BLOCKED_BY_RELEARN)
             return
+        # M4 vice-versa gate (R-M4-3): the lanes are mutually exclusive —
+        # an A analysis racing a B worker shares the same content-blind
+        # fingerprint cache the relearn gate protects against.
+        if self.compare_slot.is_working():
+            self.toast.show_message(TOAST_ANALYSIS_BLOCKED_BY_REFERENCE)
+            return
         self.session.begin(path)
         self._start_analysis(path)
+
+    def open_reference(self, path: str) -> None:
+        """Load (or replace) the Compare reference B with ``path`` (R-M4-1).
+
+        The slot owns the R-M4-3 refusal gates and returns toast-ready copy
+        when it declines; a ``None`` return means the B analysis started.
+        """
+        refusal = self.compare_slot.start(path)
+        if refusal is not None:
+            self.toast.show_message(refusal)
+
+    def _analysis_in_flight(self) -> bool:
+        """The A lane's WORKING truth (the slot's injected gate probe).
+
+        Reads the reduced verdict rather than thread state — the M3
+        postscript rule (gates flip before terminal relays) makes this safe
+        from completion handlers.
+        """
+        return self.session.verdict_state.kind is VerdictKind.WORKING
 
     def _browse(self) -> None:
         path, _selected = QFileDialog.getOpenFileName(
@@ -348,6 +414,19 @@ class MainWindow(QMainWindow):
         )
         if path:
             self.open_path(path)
+
+    def _browse_reference(self) -> None:
+        # The B-empty chip IS the browse affordance (04:456, R-M4-1).
+        path, _selected = QFileDialog.getOpenFileName(
+            self, "Open reference audio file", "", FILE_DIALOG_FILTER
+        )
+        if path:
+            self.open_reference(path)
+
+    def _on_clear_reference(self) -> None:
+        # The chip's ✕ — the ONE clearing act (R-M4-2). Toast-less like the
+        # approved demo's clearB; the refresh rides the slot's changed signal.
+        self.compare_slot.clear()
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls() and _local_audio_paths(event.mimeData().urls()):
@@ -359,7 +438,19 @@ class MainWindow(QMainWindow):
         paths = _local_audio_paths(event.mimeData().urls())
         if paths:
             event.acceptProposedAction()
-            self.open_path(paths[0])
+            # R-M4-1 drop routing: a WAV dropped while Compare is the ACTIVE
+            # page loads/replaces B; anywhere else it is A (untouched M0
+            # behavior). With no file loaded the Compare screen renders
+            # nothing (R-M4-13), so the drop falls through to A rather than
+            # feeding an invisible B analysis (authored guard, flagged).
+            on_compare = (
+                self.stack.currentIndex() == COMPARE_PAGE
+                and self.session.verdict_state.kind is not VerdictKind.NO_FILE
+            )
+            if on_compare:
+                self.open_reference(paths[0])
+            else:
+                self.open_path(paths[0])
 
     # -- worker lifecycle ---------------------------------------------------------
 
@@ -426,6 +517,7 @@ class MainWindow(QMainWindow):
         # the old unbounded-in-N 10 s freeze); a straggler is detached and
         # leaked deliberately rather than qFatal-ing (landmine 1 / review 11).
         self.relearn.close()
+        self.compare_slot.close()  # M4: the B lane's own bounded teardown
         for thread, _worker in self._threads:
             thread.quit()
             thread.wait(2000)
@@ -498,6 +590,55 @@ class MainWindow(QMainWindow):
                 session.verdict_state,
             )
         )
+        # M4: the Compare view rides the same fan-out (plus the slot's own
+        # changed signal), and the Report banner mirrors the verdict truth
+        # (R-M4-11 — chrome only; to_report() bytes are never touched).
+        self._refresh_compare()
+        state = session.verdict_state
+        self.report_section.banner.set_state(
+            state.confirmed_bpm
+            if state.kind is VerdictKind.CONFIRMED_HUMAN
+            else None
+        )
+
+    def _refresh_compare(self) -> None:
+        """Rebuild the Compare view-model from session A-state + the B slot.
+
+        The R-M4-13 nav gate: before any file has loaded (NO_FILE) the
+        section renders nothing at all. The M3 blank doctrine is applied to
+        the A side HERE (WORKING/ERROR pass ``None`` — the exact
+        BLANK_VERDICT_KINDS rule the other builders apply internally); the B
+        side comes from the persistent slot and is never blanked by A's
+        lifecycle (R-M4-2).
+        """
+        kind = self.session.verdict_state.kind
+        if kind is VerdictKind.NO_FILE:
+            self.compare_section.set_view(None)
+            return
+        blank_a = kind in (VerdictKind.WORKING, VerdictKind.ERROR)
+        self.compare_section.set_view(
+            build_compare_view(
+                None if blank_a else self.session.last_result,
+                None if blank_a else self.session.last_signal_result,
+                self.compare_slot.result,
+                self.compare_slot.signal_result,
+                self.compare_slot.status,
+            )
+        )
+
+    def _on_reference_loaded(self, result) -> None:
+        import os
+
+        # Design toast verbatim (04:875) — fires only for a CURRENT B
+        # completion (the slot's generation gate already dropped stale ones).
+        self.toast.show_message(
+            TOAST_REFERENCE_LOADED_FMT.format(name=os.path.basename(result.path))
+        )
+
+    def _on_reference_failed(self, message: str) -> None:
+        # RC copy — the design never drew a failing B; the slot has already
+        # restored the previous reference (or EMPTY), honestly.
+        self.toast.show_message(TOAST_REFERENCE_FAILED_FMT.format(message=message))
 
     def _on_verdict_changed(self, _state) -> None:
         # The session stores payload fields BEFORE reducing (its documented
@@ -695,6 +836,11 @@ class MainWindow(QMainWindow):
         # the new one, presented as ONE measurement. Refuse with a toast.
         if self.session.verdict_state.kind is VerdictKind.WORKING:
             self.toast.show_message(TOAST_RELEARN_BLOCKED_BY_ANALYSIS)
+            return
+        # M4 (R-M4-3): a B worker resolves against the same path-keyed
+        # fingerprint cache — the relearn gate covers both analysis lanes.
+        if self.compare_slot.is_working():
+            self.toast.show_message(TOAST_RELEARN_BLOCKED_BY_REFERENCE)
             return
         if self.relearn.start():
             # A determinate count arrives with the first progress signal.

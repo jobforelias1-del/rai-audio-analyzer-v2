@@ -29,6 +29,12 @@ Shots, in order:
                      the overlay's own button (green rail verdict, ✓ HUMAN
                      row, moved tempogram marker) — journaled to the ISOLATED
                      temp store only
+    12-compare       the M4 Compare section posed A+B: the confirmed drill vs
+                     a second synthetic reference loaded through the REAL
+                     open_reference lane (chips, Δ table, spectrum overlay)
+    13-compare-bempty  the same screen after the chip's clear — dashed browse
+                     chip, em-dashed B/Δ/Reading columns, the "reference (B)
+                     not loaded" pill over a lone A curve
     gate-<fixture>   one Tempo shot per acceptance-gate WAV present on disk
                      (validation/ground_truth.py paths; the WAVs are
                      .gitignored so this is existence-guarded)
@@ -103,6 +109,50 @@ def _write_silent_wav() -> str:
     os.close(fd)
     write_wav(path, np.zeros(int(SILENT_DURATION_S * SILENT_SR), dtype=np.float32), SILENT_SR)
     return path
+
+
+def _write_reference_wav() -> str:
+    """A second drill fixture (150 BPM) for the M4 Compare reference B."""
+    from rai_analyzer.synthetic import drill_pattern, write_wav
+
+    fd, path = tempfile.mkstemp(prefix="rai_preview_ref_", suffix=".wav")
+    os.close(fd)
+    return write_wav(path, drill_pattern(150.0, duration=8.0))
+
+
+def _run_reference_analysis(app, window, path: str) -> None:
+    """Drive one REAL B analysis through open_reference and wait (M4)."""
+    from PySide6.QtCore import QEventLoop, QTimer
+
+    outcome: dict = {}
+    loop = QEventLoop()
+
+    def _on_loaded(result: object) -> None:
+        outcome["result"] = result
+        loop.quit()
+
+    def _on_failed(message: str) -> None:
+        outcome["error"] = str(message)
+        loop.quit()
+
+    window.compare_slot.loaded.connect(_on_loaded)
+    window.compare_slot.failed.connect(_on_failed)
+    try:
+        window.open_reference(path)
+        if not outcome:
+            timer = QTimer(window)
+            timer.setSingleShot(True)
+            timer.timeout.connect(loop.quit)
+            timer.start(ANALYSIS_TIMEOUT_MS)
+            loop.exec()
+    finally:
+        window.compare_slot.loaded.disconnect(_on_loaded)
+        window.compare_slot.failed.disconnect(_on_failed)
+    if "result" not in outcome and "error" not in outcome:
+        raise RuntimeError(f"reference analysis of {path!r} timed out")
+    if "error" in outcome:
+        raise RuntimeError(f"reference analysis of {path!r} failed: {outcome['error']}")
+    app.processEvents()
 
 
 def _run_analysis(app, window, path: str) -> None:
@@ -239,6 +289,22 @@ def main(argv: list[str]) -> int:
         overlay.confirm_button.click()
         window.toast.hide()  # the 2.4 s toast would cover the rail's rows
         shot("11-confirmed")
+
+        # M4 appends (same append-only rule): the Compare section — A (the
+        # confirmed drill result, still current) vs a second synthetic
+        # reference loaded through the REAL entry point (open_reference ->
+        # CompareSlot's own worker lane), then the B-empty state after the
+        # one designed clearing act. Store isolation is inherited: the B
+        # worker's md5/profile probes hit the same temp dirs.
+        ref_wav = _write_reference_wav()
+        temp_wavs.append(ref_wav)
+        window.nav.set_current("Compare")
+        _run_reference_analysis(app, window, ref_wav)
+        window.toast.hide()  # the reference-loaded toast would cover the well
+        shot("12-compare")
+
+        window.compare_slot.clear()
+        shot("13-compare-bempty")
 
         # Acceptance-gate fixtures, if the producer has them on disk.
         from validation.ground_truth import available_tracks

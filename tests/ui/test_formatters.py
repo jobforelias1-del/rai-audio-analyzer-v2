@@ -262,19 +262,34 @@ def test_unavailability_unknown_kind_raises():
 
 
 def test_cli_command_basic():
-    assert fm.cli_command("/Users/e/track.wav") == 'rai-analyze "/Users/e/track.wav" --json'
+    assert (
+        fm.cli_command("/Users/e/track.wav")
+        == 'rai-analyze "/Users/e/track.wav" --json --profile drill'
+    )
 
 
 def test_cli_command_quotes_spaces():
     cmd = fm.cli_command("/My Music/final mix 2.wav")
-    assert cmd == 'rai-analyze "/My Music/final mix 2.wav" --json'
+    assert cmd == 'rai-analyze "/My Music/final mix 2.wav" --json --profile drill'
 
 
 def test_cli_command_escapes_embedded_quotes():
     cmd = fm.cli_command('/mix/take "b".wav')
-    assert cmd == 'rai-analyze "/mix/take \\"b\\".wav" --json'
+    assert cmd == 'rai-analyze "/mix/take \\"b\\".wav" --json --profile drill'
 
 
-def test_cli_command_has_no_profile_flag_until_m4():
-    # The M0 CLI does not accept --profile; a copied command must never error.
-    assert "--profile" not in fm.cli_command("/a.wav")
+def test_cli_command_profile_flag_matches_m4_cli():
+    # R-M4-10: the M4 CLI accepts --profile, and the copied command names the
+    # active profile explicitly. Default is the one packaged profile.
+    assert fm.cli_command("/a.wav") == fm.cli_command("/a.wav", profile="drill")
+    assert fm.cli_command("/a.wav").endswith("--json --profile drill")
+
+
+def test_cli_command_default_profile_is_a_registry_key():
+    # The default the formatter bakes in must be a name the CLI's packaged
+    # registry actually accepts — a copied command must never error (M1 law).
+    from rai_analyzer.profiles import DEFAULT_PROFILE, PROFILES
+
+    default_cmd = fm.cli_command("/a.wav")
+    assert default_cmd.endswith(f"--profile {DEFAULT_PROFILE}")
+    assert DEFAULT_PROFILE in PROFILES

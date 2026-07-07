@@ -172,19 +172,23 @@ def test_result_updates_chrome_and_lands_on_tempo(window, qtbot):
 
 
 def test_placeholders_replaced_by_real_sections(window):
+    from rai_ui.main_window import COMPARE_PAGE
+    from rai_ui.sections.compare import CompareSection
     from rai_ui.sections.overview import OverviewSection
     from rai_ui.sections.signal import SignalSection
     from rai_ui.sections.tempo import TempoSection
 
-    # Tempo is real as of M1, Overview/Signal as of M2; Compare remains the
-    # one honest placeholder (M4).
-    assert set(window._placeholders) == {"Compare"}
+    # Tempo is real as of M1, Overview/Signal as of M2, Compare as of M4 —
+    # every nav section is a real page now.
+    assert window._placeholders == {}
     assert isinstance(window.stack.widget(OVERVIEW_PAGE), OverviewSection)
     assert window.stack.widget(OVERVIEW_PAGE) is window.overview_section
     assert isinstance(window.stack.widget(TEMPO_PAGE), TempoSection)
     assert window.stack.widget(TEMPO_PAGE) is window.tempo_section
     assert isinstance(window.stack.widget(SIGNAL_PAGE), SignalSection)
     assert window.stack.widget(SIGNAL_PAGE) is window.signal_section
+    assert isinstance(window.stack.widget(COMPARE_PAGE), CompareSection)
+    assert window.stack.widget(COMPARE_PAGE) is window.compare_section
 
 
 def test_failure_shows_toast_not_modal(window, qtbot):

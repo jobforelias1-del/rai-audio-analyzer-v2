@@ -265,18 +265,21 @@ def unavailability_reason(kind: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def cli_command(path: str) -> str:
+def cli_command(path: str, profile: str = "drill") -> str:
     """The copy-pasteable CLI equivalent of the current analysis.
 
-    Emits exactly ``rai-analyze "<path>" --json``. No ``--profile`` flag until
-    M4: the M0 CLI does not accept one (rai_analyzer/cli.py), and a copied
-    command must never error when pasted — the flag is added here the moment
-    the CLI grows it, not before.
+    Emits exactly ``rai-analyze "<path>" --json --profile drill`` (R-M4-10).
+    The M4 CLI grew ``--profile`` (rai_analyzer/cli.py, packaged registry in
+    rai_analyzer/profiles.py), so the copied command now names the active
+    profile explicitly — closing the M1-era "no flag until the CLI grows it"
+    note. ``profile`` defaults to the one packaged profile; callers that pass
+    nothing (ReportSection today) inherit it.
 
     Quoting: the path is double-quoted with embedded double quotes
     backslash-escaped. ``shlex.quote`` is deliberately not used — its
     single-quote style breaks on Windows ``cmd``, and double quotes are the
-    one form every target shell accepts.
+    one form every target shell accepts. Profile names come from the packaged
+    registry's code-owned keys (bare identifiers), so they ride unquoted.
     """
     escaped = path.replace('"', '\\"')
-    return f'rai-analyze "{escaped}" --json'
+    return f'rai-analyze "{escaped}" --json --profile {profile}'
