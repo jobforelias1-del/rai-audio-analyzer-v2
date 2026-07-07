@@ -8,7 +8,12 @@ rai_ui.theme.pens never drags in PySide6 (test collection without Qt).
 
 from __future__ import annotations
 
-from rai_ui.theme._tokens_gen import COLOR_PLOT_BAND_EDGE, LINE_HAIRLINE
+from rai_ui.theme._tokens_gen import (
+    COLOR_PLOT_BAND_EDGE,
+    COLOR_PLOT_GRID,
+    COLOR_PLOT_WAVEFORM,
+    LINE_HAIRLINE,
+)
 
 _STYLES = ("solid", "dash")
 
@@ -18,6 +23,18 @@ _STYLES = ("solid", "dash")
 # cannot drift. Cosmetic like every plot pen (see qpen).
 # token: color.plot.band-edge · line.hairline
 PEN_BAND_EDGE = (COLOR_PLOT_BAND_EDGE, float(LINE_HAIRLINE), "solid", None)
+
+# The Overview waveform envelope stroke (R-M2-9): the approved screens draw
+# it at 1.2px in a dedicated context-dim hue (04:391) so a dense min/max
+# envelope reads as context, not data emphasis. The 1.2 width is an
+# approved-screen literal — no line token carries it — queued with tokens
+# v0.1.3 for design reconciliation.
+# token: color.plot.waveform (v0.1.3) · width literal 1.2 (04:391)
+PEN_WAVEFORM = (COLOR_PLOT_WAVEFORM, 1.2, "solid", None)
+
+# The waveform well's center zero-line (04:392) — grid hue at hairline width.
+# token: color.plot.grid · line.hairline
+PEN_ZERO_LINE = (COLOR_PLOT_GRID, float(LINE_HAIRLINE), "solid", None)
 
 
 def qpen(spec: tuple):

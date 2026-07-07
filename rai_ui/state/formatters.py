@@ -161,6 +161,76 @@ def fmt_dbfs(x: Optional[float]) -> str:
     return _fmt_measurement(x)
 
 
+def _fmt_measurement_1dp(x: Optional[float]) -> str:
+    """One-decimal variant of ``_fmt_measurement`` (same absence policy).
+
+    The M2 Signal metrics render at 1 dp per the approved Console demo values
+    (DR ``8.2`` / RMS ``−16.4`` / sub ``10.5 %``) — coarser than the tempo
+    lane's 2 dp because these are whole-file summary figures, not grid-locked
+    BPMs.
+    """
+    if x is None:
+        return EM_DASH
+    x = float(x)
+    if math.isnan(x):
+        return EM_DASH
+    if math.isinf(x):
+        return NEG_INFINITY
+    return f"{x:.1f}".replace("-", MINUS_SIGN)
+
+
+def fmt_pct(x: Optional[float]) -> str:
+    """Percentage share with the design's trailing-zero trim: ``62.0`` ->
+    ``"62 %"``, ``10.5`` -> ``"10.5 %"``, ``0.0`` -> ``"0 %"`` (M2 demo values
+    verbatim). ``None``/NaN -> ``"—"`` — a share of nothing is absence, and it
+    must never render as a lying ``"0 %"`` (R-M2-5 doctrine).
+
+    The unit rides INSIDE the string ("21 %", space included) because that is
+    how the approved cards and rail rows print it — unlike dB/LUFS, where the
+    unit lives in the surrounding label.
+    """
+    if x is None:
+        return EM_DASH
+    x = float(x)
+    if math.isnan(x):
+        return EM_DASH
+    if math.isinf(x):
+        return NEG_INFINITY  # impossible for a share; policy consistency only
+    text = f"{x:.1f}"
+    if text.endswith(".0"):
+        text = text[:-2]
+    if text == "-0":  # -0.04 rounds to "-0.0" -> "-0": normalize the sign away
+        text = "0"
+    return text.replace("-", MINUS_SIGN) + " %"
+
+
+def fmt_dr(x: Optional[float]) -> str:
+    """Dynamic-range (crest) number, 1 dp: ``8.21`` -> ``"8.2"``.
+
+    Also the formatter for the DR card's caption RMS value (same 1 dp per the
+    demo's ``RMS −16.4 dB``) — one truth for both numbers on that card.
+    NaN (silent-file crest) -> ``"—"`` (absence); ``-inf`` (silent-file RMS)
+    -> ``"−∞"`` (a measurement).
+    """
+    return _fmt_measurement_1dp(x)
+
+
+def fmt_mmss(seconds: Optional[float]) -> str:
+    """``194.9`` -> ``"3:14"`` — the waveform axis' mm:ss length label.
+
+    Seconds are floored (an axis end label must never claim time the file
+    does not contain); minutes are unbounded (``"74:59"``) — the design shows
+    no h:mm:ss form. ``None``/NaN/negative -> ``"—"`` (absence policy).
+    """
+    if seconds is None:
+        return EM_DASH
+    s = float(seconds)
+    if math.isnan(s) or math.isinf(s) or s < 0:
+        return EM_DASH
+    total = int(s)
+    return f"{total // 60}:{total % 60:02d}"
+
+
 # ---------------------------------------------------------------------------
 # Unavailability chips
 # ---------------------------------------------------------------------------

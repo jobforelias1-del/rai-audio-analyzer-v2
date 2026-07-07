@@ -340,3 +340,35 @@ QPushButton#tiebreakButton {
 QPushButton#tiebreakButton:hover {
     background-color: #EC6A60;
 }
+
+/* ---- M2 Overview / Signal lane -----------------------------------------------
+ * Object names are a shared contract with the M2 widgets (spectrum pane,
+ * waveform pane, metric cards, section containers). QSS owns surfaces/
+ * borders/colors only; card padding (16px 18px), gauge heights, and every
+ * designed type size are pinned widget-level per Landmine 6/8.
+ */
+
+/* Spectrum + waveform wells: the same inset plot-bed idiom as the tempogram
+ * (C-16 — 04:405 / 04:388). */
+QFrame#spectrumPane,
+QFrame#waveformPane {
+    background-color: #090B0D;
+    border: 1px solid #242B34;
+    border-radius: 12px;
+}
+
+/* Overview summary cards + Signal metric cards (04:356/04:423 card chrome:
+ * panel surface, hairline border, radius.lg — panel-on-canvas per the
+ * approved screens; see M2 recon token cross-check). */
+QFrame#metricCard {
+    background-color: #12161B;
+    border: 1px solid #242B34;
+    border-radius: 12px;
+}
+
+/* Section containers sit directly on the canvas — the cards and wells carry
+ * every surface. */
+QWidget#overviewSection,
+QWidget#signalSection {
+    background-color: transparent;
+}

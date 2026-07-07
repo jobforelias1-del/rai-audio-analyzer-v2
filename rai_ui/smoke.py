@@ -65,6 +65,7 @@ def run_smoke(args) -> int:
         "bpm": None,
         "ambiguous": None,
         "tempo_ok": None,
+        "signal_ok": None,
         "seconds": None,
         "audio_ok": None,
         "commit": _commit(),
@@ -181,6 +182,22 @@ def _probe(report: dict, want_audio: bool) -> int:
             report["tempo_ok"] = bool(
                 len(vm.markers) >= 1
                 and window.tempo_section.candidates.model.rowCount() >= 1
+            )
+            # M2 additive check: the Signal section actually rendered the
+            # metrics — a populated spectrum curve and all three metric cards
+            # showing measurements, not absence dashes. The fixture is a mono
+            # synthetic, so Stereo width legitimately reads "0 %" (a
+            # measurement, R-M2-4) — any non-dash value counts as populated.
+            # ADDITIVE key, same contract as tempo_ok above: check_json reads
+            # only the keys it knows.
+            svm = window.signal_section.view()
+            dash = "—"  # em dash — absence, never a measurement
+            report["signal_ok"] = bool(
+                svm.spectrum_freqs is not None
+                and len(svm.spectrum_freqs) > 0
+                and svm.width_card.value_text != dash
+                and svm.sub_card.value_text != dash
+                and svm.dr_card.value_text != dash
             )
         elif "error" in outcome:
             report["analysis_error"] = outcome["error"]

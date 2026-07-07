@@ -56,7 +56,9 @@ def test_worker_analyzes_real_wav_on_thread(qtbot, drill_wav):
     worker.moveToThread(thread)
 
     received = []
-    worker.finished.connect(lambda r, f, s, secs: received.append((r, f, s, secs)))
+    worker.finished.connect(
+        lambda r, f, s, secs, sig: received.append((r, f, s, secs, sig))
+    )
     try:
         with qtbot.waitSignal(worker.finished, timeout=ANALYSIS_TIMEOUT_MS):
             thread.start()
@@ -67,7 +69,7 @@ def test_worker_analyzes_real_wav_on_thread(qtbot, drill_wav):
         thread.quit()
         thread.wait(10_000)
 
-    result, features, signal_obj, seconds = received[0]
+    result, features, signal_obj, seconds, signal_result = received[0]
     assert result.path == drill_wav
     assert result.duration == pytest.approx(6.0, abs=0.25)
     # Plausible tempo: the 150 BPM drill may honestly resolve to an octave
@@ -77,6 +79,39 @@ def test_worker_analyzes_real_wav_on_thread(qtbot, drill_wav):
     assert seconds > 0.0
     assert features is not None
     assert signal_obj is not None and signal_obj.duration == pytest.approx(6.0, abs=0.25)
+    # M2: the composed SignalResult rides fifth (R-M2-15) with sane physics —
+    # a real drill pattern has positive crest and a mono width of exactly 0.
+    assert signal_result is not None
+    assert signal_result.dynamics.crest_db > 0.0
+    assert signal_result.dynamics.peak_dbfs >= signal_result.dynamics.rms_dbfs
+    assert signal_result.stereo.width_pct == 0.0  # synthetic drill WAV is mono
+    assert 0.0 <= signal_result.bands.sub_pct <= 100.0
+    assert signal_result.spectrum.freqs.size > 0
+
+
+def test_worker_metrics_failure_degrades_to_none(qtbot, drill_wav, monkeypatch):
+    """R-M2-15: a metrics exception must NOT kill the analysis — the worker
+    logs, degrades signal_result to None, and still emits finished."""
+    import rai_analyzer.metrics.compute as metrics_compute
+
+    from rai_ui.services.worker import AnalysisWorker
+
+    def _boom(_signal):
+        raise RuntimeError("metrics exploded")
+
+    monkeypatch.setattr(metrics_compute, "compute_signal_result", _boom)
+
+    worker = AnalysisWorker()
+    received = []
+    worker.finished.connect(
+        lambda r, f, s, secs, sig: received.append((r, f, s, secs, sig))
+    )
+    with qtbot.waitSignal(worker.finished, timeout=ANALYSIS_TIMEOUT_MS):
+        worker.run(drill_wav)  # direct call — same thread, deterministic
+
+    result, features, signal_obj, seconds, signal_result = received[0]
+    assert result is not None and result.tempo.candidates
+    assert signal_result is None  # degraded, not fatal
 
 
 def test_worker_failure_emits_last_traceback_line(qtbot, tmp_path):
@@ -105,12 +140,19 @@ def test_open_path_end_to_end_populates_session(qtbot, drill_wav, isolated_setti
     assert session.analysis_seconds is not None and session.analysis_seconds > 0.0
     assert session.last_features is not None
     assert session.last_signal_obj is not None
+    # M2 plumbing proof: worker → MainWindow → session, fifth position intact.
+    assert session.last_signal_result is not None
+    assert session.last_signal_result.dynamics.crest_db > 0.0
 
 
 class _ManualWorker(QObject):
-    """Never completes on its own; the test emits completions in a chosen order."""
+    """Never completes on its own; the test emits completions in a chosen order.
 
-    finished = Signal(object, object, object, float)
+    Mirrors the real worker's M2 signature (5th ``object`` = SignalResult |
+    None, R-M2-15) so the stale-drop path is tested against the live contract.
+    """
+
+    finished = Signal(object, object, object, float, object)
     failed = Signal(str)
     created: list = []
 
@@ -141,11 +183,11 @@ def test_stale_generation_result_is_dropped(qtbot, monkeypatch, isolated_setting
     older = make_fake_result("/tmp/first.wav", bpm=90.0)
 
     with qtbot.waitSignal(window.session.result_ready):
-        second_worker.finished.emit(newer, None, None, 0.5)
+        second_worker.finished.emit(newer, None, None, 0.5, None)
 
     results_after = []
     window.session.result_ready.connect(lambda r: results_after.append(r))
-    first_worker.finished.emit(older, None, None, 2.0)  # stale — must be dropped
+    first_worker.finished.emit(older, None, None, 2.0, None)  # stale — must be dropped
     qtbot.wait(50)
 
     assert results_after == []

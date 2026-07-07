@@ -24,10 +24,11 @@ Signal contract (shared interface — other agents rely on these exact names):
   change" is the reducer's business, not the wiring's.
 
 Ordering contract inside ``finish`` (widgets rely on it): stored fields
-(``last_result``/``last_features``/``last_signal_obj``/``analysis_seconds``)
-are set FIRST, then the verdict reduces and ``verdict_changed`` fires, then
-``result_ready``, then ``working(False)`` — so a ``result_ready`` subscriber
-already sees both the fresh payload and the fresh verdict.
+(``last_result``/``last_features``/``last_signal_obj``/``last_signal_result``/
+``analysis_seconds``) are set FIRST, then the verdict reduces and
+``verdict_changed`` fires, then ``result_ready``, then ``working(False)`` —
+so a ``result_ready`` subscriber already sees both the fresh payload and the
+fresh verdict.
 """
 
 from __future__ import annotations
@@ -53,6 +54,7 @@ class SessionState(QObject):
         self.last_result = None  # AnalysisResult | None
         self.last_features = None  # Features | None
         self.last_signal_obj = None  # AudioSignal | None
+        self.last_signal_result = None  # metrics SignalResult | None (M2)
         self.analysis_seconds: Optional[float] = None
         self.verdict_state: verdict.VerdictState = verdict.INITIAL
 
@@ -67,7 +69,9 @@ class SessionState(QObject):
         self._reduce(verdict.OpenFile(path=path))
         self.working.emit(True)
 
-    def finish(self, result, features, signal_obj, seconds: Optional[float]) -> None:
+    def finish(
+        self, result, features, signal_obj, seconds: Optional[float], signal_result=None
+    ) -> None:
         """Store a completed analysis and notify subscribers.
 
         The verdict reduces after the payload fields are stored and before
@@ -75,10 +79,16 @@ class SessionState(QObject):
         ``result_ready`` still fires before ``working(False)`` so listeners
         that re-render on the working flag (the status bar) already see the
         fresh data when they redraw.
+
+        ``signal_result`` is the worker-composed M2 metrics record — a
+        keyword-additive parameter (R-M2-15) so every pre-M2 caller keeps
+        working; it is stored in the fields-FIRST phase like the rest of the
+        payload so ``verdict_changed`` subscribers already see it.
         """
         self.last_result = result
         self.last_features = features
         self.last_signal_obj = signal_obj
+        self.last_signal_result = signal_result
         self.analysis_seconds = float(seconds) if seconds is not None else None
         tempo = result.tempo
         self._reduce(

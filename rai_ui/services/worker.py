@@ -28,15 +28,17 @@ class AnalysisWorker(QObject):
 
     Signals:
 
-    * ``finished(result, features, signal_obj, seconds)`` — the
-      ``AnalysisResult``, the ``Features`` (so plot panes never re-load the
-      file), the ``AudioSignal``, and the wall-clock analysis time in seconds
-      (pure pipeline time, measured inside the worker).
+    * ``finished(result, features, signal_obj, seconds, signal_result)`` —
+      the ``AnalysisResult``, the ``Features`` (so plot panes never re-load
+      the file), the ``AudioSignal``, the wall-clock analysis time in seconds
+      (pure pipeline time, measured inside the worker), and the M2
+      ``SignalResult`` metrics record (or ``None`` — metrics are best-effort,
+      appended fifth per R-M2-15 so the four existing positions never move).
     * ``failed(message)`` — the last line of the traceback, suitable for a
       toast; never raises across the thread boundary.
     """
 
-    finished = Signal(object, object, object, float)
+    finished = Signal(object, object, object, float, object)
     failed = Signal(str)
 
     @Slot(str)
@@ -71,8 +73,24 @@ class AnalysisWorker(QObject):
                 tempo=tempo,
                 loudness=loudness,
             )
+
+            # M2 signal metrics ride the same best-effort contract as
+            # loudness (R-M2-15): a metrics exception must never kill the
+            # analysis. Log-and-None — the traceback goes to stderr so a
+            # degraded run is diagnosable, and the UI honestly renders the
+            # affected cards as absence with an "unavailable" chip.
+            signal_result = None
+            try:
+                from rai_analyzer.metrics.compute import compute_signal_result
+
+                signal_result = compute_signal_result(signal)
+            except Exception:
+                traceback.print_exc()
+                signal_result = None
         except Exception as exc:
             last_line = traceback.format_exception_only(type(exc), exc)[-1].strip()
             self.failed.emit(last_line)
             return
-        self.finished.emit(result, features, signal, time.perf_counter() - t0)
+        self.finished.emit(
+            result, features, signal, time.perf_counter() - t0, signal_result
+        )

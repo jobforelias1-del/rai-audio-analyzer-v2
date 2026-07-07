@@ -127,6 +127,76 @@ class TestVerdictWordUnderRealTheme:
         _assert_type(font, MONO, 13, 600)  # verdict word 13/600
 
 
+class TestM2CardsRampUnderRealTheme:
+    """The M2 Overview/Signal designed type survives the real stylesheet.
+
+    tests/ui/test_metric_cards.py covers every card label exhaustively; the
+    entries here are the KEY sizes on the shared regression gate, per the
+    integrate manifest — one per new designed scale step."""
+
+    def _rows_view(self):
+        from rai_ui.state.signal_view import MetricRowView, RowsCardView
+
+        return RowsCardView(
+            label="Loudness",
+            rows=(MetricRowView(label="Integrated", value_text="−9.80", unit="LUFS"),),
+            chip=None,
+        )
+
+    def test_tempo_card_primary_is_mono_34(self, themed_app, qtbot):
+        from rai_ui.widgets.metric_cards import TempoCard
+
+        card = TempoCard()
+        font = _polished_font(themed_app, qtbot, card, card.primary_value)
+        _assert_type(font, MONO, 34, 600)  # Overview primary 34/600 (04:358)
+
+    def test_tempo_card_felt_is_mono_19(self, themed_app, qtbot):
+        from rai_ui.widgets.metric_cards import TempoCard
+
+        card = TempoCard()
+        font = _polished_font(themed_app, qtbot, card, card.felt_value)
+        _assert_type(font, MONO, 19, 500)  # Overview felt 19/500 (04:361)
+
+    def test_gauge_card_value_is_mono_30(self, themed_app, qtbot):
+        from rai_ui.widgets.metric_cards import GaugeCard
+
+        card = GaugeCard()
+        font = _polished_font(themed_app, qtbot, card, card.value_label)
+        _assert_type(font, MONO, 30, 500)  # Signal metric value 30/500 (C-07 m)
+
+    def test_rows_card_value_is_mono_16(self, themed_app, qtbot):
+        from rai_ui.widgets.metric_cards import RowsCard
+
+        card = RowsCard()
+        card.set_view(self._rows_view())
+        font = _polished_font(themed_app, qtbot, card, card.row_value_labels[0])
+        _assert_type(font, MONO, 16, 600)  # card row value 16/600 (04:369)
+
+    def test_file_card_value_is_mono_12(self, themed_app, qtbot):
+        from rai_ui.widgets.metric_cards import RowsCard
+
+        card = RowsCard(value_px=12, value_weight=QFont.Weight.Medium)
+        card.set_view(self._rows_view())
+        font = _polished_font(themed_app, qtbot, card, card.row_value_labels[0])
+        _assert_type(font, MONO, 12, 500)  # File card compact value (04:382)
+
+
+class TestM2PaneLabelsUnderRealTheme:
+    def test_spectrum_pane_title_is_sans_11(self, themed_app, qtbot):
+        from rai_ui.plots.spectrum import SpectrumPane
+
+        pane = SpectrumPane()
+        font = _polished_font(themed_app, qtbot, pane, pane._title)
+        _assert_type(font, SANS, 11, 500)  # pane label 11/500 (C-16)
+
+    def test_waveform_pane_title_is_sans_11(self, themed_app, qtbot):
+        from rai_ui.plots.waveform import WaveformPane
+
+        pane = WaveformPane()
+        font = _polished_font(themed_app, qtbot, pane, pane._title)
+        _assert_type(font, SANS, 11, 500)  # pane label 11/500 (C-16)
+
+
 class TestGroupLabelUnderRealTheme:
     def test_group_label_type_and_tracking_survive(self, themed_app, qtbot):
         """11px/500 uppercase heading keeps its 0.07em QFont tracking: the

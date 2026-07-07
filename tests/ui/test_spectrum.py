@@ -1,0 +1,302 @@
+"""Tests for the spectrum pane (Signal section, C-16 idiom).
+
+Everything runs offscreen against ``SignalViewModel`` instances — mostly
+built through the real ``build_signal_view`` over the real metrics contracts
+(the fakes are shared with ``tests/ui/test_signal_view.py`` — one set of
+fakes, every section), so the normalization test exercises the actual
+builder → widget pipeline.
+
+What matters here, per the M2 SPECTRUM manifest:
+
+* the five axis labels sit at TRUE log positions (the mock's even spacing
+  was a shortcut — the log map is the binding intent, R-M2-7),
+* curve normalization: the displayed curve's max sits at the 0 dB top and
+  nothing dips below the −90 dB floor,
+* silence renders the R-M2-8 copy and no curve; a later result recovers,
+* the working sweep starts/stops with effective visibility — no timer leaks,
+* ``set_view`` is idempotent: a second identical call creates no duplicate
+  plot items or child widgets.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import math
+
+import numpy as np
+import pytest
+
+pytest.importorskip("PySide6")
+pytest.importorskip("pytestqt")
+pytest.importorskip("pyqtgraph")
+
+from PySide6.QtCore import QObject
+
+from rai_ui.plots.spectrum import (
+    AXIS_TICKS,
+    GRID_FRACS,
+    PANE_CAPTION,
+    PANE_TITLE,
+    Y_VIEW_BOTTOM_DB,
+    Y_VIEW_TOP_DB,
+    SpectrumPane,
+    log_x_fraction,
+)
+from rai_ui.state.signal_view import (
+    EMPTY_SIGNAL_VIEW,
+    SILENT_SPECTRUM_TEXT,
+    SPECTRUM_FLOOR_DB,
+    SPECTRUM_TOP_DB,
+    build_signal_view,
+)
+from tests.ui.test_signal_view import (
+    CONFIDENT,
+    make_signal_result,
+    make_spectrum,
+    silent_signal_result,
+)
+
+PANE_SIZE = (900, 320)
+
+_LOG_SPAN = math.log10(20000.0) - math.log10(20.0)
+
+
+def populated_vm(**signal_kw):
+    """A real vm through the real builder — the exact worker-shaped payload."""
+    return build_signal_view(None, make_signal_result(**signal_kw), CONFIDENT)
+
+
+def silent_vm():
+    return build_signal_view(None, silent_signal_result(), CONFIDENT)
+
+
+@pytest.fixture
+def pane(qtbot):
+    widget = SpectrumPane()
+    qtbot.addWidget(widget)
+    widget.resize(*PANE_SIZE)
+    with qtbot.waitExposed(widget):
+        widget.show()
+    return widget
+
+
+# ---------------------------------------------------------------------------
+# Log-x map + axis labels
+# ---------------------------------------------------------------------------
+
+
+def test_log_x_fraction_true_positions():
+    # The recon's point: even spacing is only a mock shortcut — 100 Hz sits
+    # at ~23% of the log span, 1 k at ~57%, 10 k at ~90%.
+    assert log_x_fraction(20.0) == pytest.approx(0.0)
+    assert log_x_fraction(20000.0) == pytest.approx(1.0)
+    assert log_x_fraction(100.0) == pytest.approx(math.log10(5.0) / _LOG_SPAN)
+    assert log_x_fraction(1000.0) == pytest.approx(math.log10(50.0) / _LOG_SPAN)
+    assert log_x_fraction(10000.0) == pytest.approx(math.log10(500.0) / _LOG_SPAN)
+    assert log_x_fraction(100.0) == pytest.approx(0.233, abs=0.001)
+    assert log_x_fraction(1000.0) == pytest.approx(0.566, abs=0.001)
+    assert log_x_fraction(10000.0) == pytest.approx(0.900, abs=0.001)
+
+
+def test_axis_labels_verbatim_units_only_at_ends():
+    assert tuple(label for _f, label in AXIS_TICKS) == (
+        "20 Hz",
+        "100",
+        "1 k",
+        "10 k",
+        "20 kHz",
+    )
+    assert tuple(freq for freq, _l in AXIS_TICKS) == (
+        20.0,
+        100.0,
+        1000.0,
+        10000.0,
+        20000.0,
+    )
+
+
+def test_axis_row_places_ticks_at_log_positions(pane):
+    for freq, _label in AXIS_TICKS:
+        assert pane._axis._x_for(freq) == pytest.approx(
+            log_x_fraction(freq) * pane._axis.width()
+        )
+
+
+def test_freq_to_x_maps_through_locked_domain(pane):
+    plot_rect = pane._plot.geometry()
+    for freq in (20.0, 100.0, 1000.0, 10000.0, 20000.0):
+        assert pane.freq_to_x(freq) == pytest.approx(
+            plot_rect.x() + log_x_fraction(freq) * plot_rect.width()
+        )
+
+
+# ---------------------------------------------------------------------------
+# Locked window + chrome
+# ---------------------------------------------------------------------------
+
+
+def test_ranges_locked_and_mouse_disabled(pane):
+    pane.set_view(populated_vm())
+    viewbox = pane._plot.getPlotItem().getViewBox()
+    (x_lo, x_hi), (y_lo, y_hi) = viewbox.viewRange()
+    assert (x_lo, x_hi) == pytest.approx((math.log10(20.0), math.log10(20000.0)))
+    assert (y_lo, y_hi) == pytest.approx((Y_VIEW_BOTTOM_DB, Y_VIEW_TOP_DB))
+    assert viewbox.state["mouseEnabled"] == [False, False]
+    assert pane._plot.getPlotItem().legend is None  # no legend widget — ever
+
+
+def test_gridlines_horizontal_at_quarter_steps(pane):
+    span = Y_VIEW_TOP_DB - Y_VIEW_BOTTOM_DB
+    expected = [Y_VIEW_BOTTOM_DB + frac * span for frac in GRID_FRACS]
+    assert sorted(line.value() for line in pane._grid_lines) == pytest.approx(expected)
+    for line in pane._grid_lines:
+        assert line.angle == 0  # horizontal — Signal flips the tempogram's grid
+
+
+def test_label_row_copy(pane):
+    assert pane._title.text() == PANE_TITLE
+    assert pane._caption.text() == PANE_CAPTION
+
+
+def test_curve_pen_and_fill_are_the_tokens(pane):
+    pen = pane._curve.opts["pen"]
+    assert pen.color().name().upper() == "#57C2D6"  # token: color.plot.data-a
+    assert pen.widthF() == pytest.approx(2.0)
+    assert pen.isCosmetic()
+    brush = pane._curve.opts["fillBrush"]
+    assert brush.color().name().upper() == "#123038"  # token: color.plot.data-a-fill
+    assert pane._curve.opts["fillLevel"] == SPECTRUM_FLOOR_DB
+
+
+# ---------------------------------------------------------------------------
+# Curve data + normalization
+# ---------------------------------------------------------------------------
+
+
+def test_curve_renders_normalized_view_model(pane):
+    vm = populated_vm()
+    pane.set_view(vm)
+    assert pane._curve.isVisible()
+    x, y = pane._curve.getData()
+    np.testing.assert_allclose(x, np.log10(vm.spectrum_freqs))
+    np.testing.assert_allclose(y, vm.spectrum_db)
+
+
+def test_curve_max_sits_at_zero_db_top(pane):
+    # End-to-end through the real builder: unnormalized engine dB in,
+    # max-at-0 out (R-M2-7), floor respected, peak inside the locked window.
+    vm = populated_vm(spectrum=make_spectrum(lo_db=-60.0, hi_db=-30.0))
+    pane.set_view(vm)
+    _x, y = pane._curve.getData()
+    assert float(y.max()) == pytest.approx(SPECTRUM_TOP_DB)
+    assert float(y.min()) >= SPECTRUM_FLOOR_DB
+    assert Y_VIEW_TOP_DB >= SPECTRUM_TOP_DB  # headroom: the peak never clips
+
+
+# ---------------------------------------------------------------------------
+# Silence + empty states
+# ---------------------------------------------------------------------------
+
+
+def test_silence_shows_copy_and_no_curve(pane):
+    vm = silent_vm()
+    assert vm.silent
+    pane.set_view(vm)
+    assert pane._silent_label.isVisible()
+    assert pane._silent_label.text() == SILENT_SPECTRUM_TEXT
+    assert not pane._curve.isVisible()
+
+
+def test_silence_copy_centered_on_bed(pane):
+    pane.set_view(silent_vm())
+    plot_rect = pane._plot.geometry()
+    label = pane._silent_label
+    assert label.x() == round(plot_rect.center().x() - label.width() / 2)
+    assert label.y() == round(plot_rect.center().y() - label.height() / 2)
+
+
+def test_empty_view_shows_bed_only(pane):
+    pane.set_view(EMPTY_SIGNAL_VIEW)
+    assert not pane._curve.isVisible()
+    assert not pane._silent_label.isVisible()
+
+
+def test_result_after_silence_recovers(pane):
+    pane.set_view(silent_vm())
+    pane.set_view(populated_vm())
+    assert pane._curve.isVisible()
+    assert not pane._silent_label.isVisible()
+
+
+def test_silence_after_result_drops_curve(pane):
+    pane.set_view(populated_vm())
+    pane.set_view(silent_vm())
+    assert not pane._curve.isVisible()
+    assert pane._silent_label.isVisible()
+
+
+# ---------------------------------------------------------------------------
+# Working sweep — start/stop, no timer leaks
+# ---------------------------------------------------------------------------
+
+
+def test_working_overlay_starts_and_stops(pane):
+    assert not pane.sweep_running()
+    pane.set_working(True)
+    assert pane._overlay.isVisible()
+    assert pane.sweep_running()
+    pane.set_working(False)
+    assert not pane._overlay.isVisible()
+    assert not pane.sweep_running()
+
+
+def test_sweep_stops_when_pane_hidden(pane):
+    pane.set_working(True)
+    assert pane.sweep_running()
+    pane.hide()  # e.g. section switch — the hide event reaches the overlay
+    assert not pane.sweep_running()
+    pane.show()  # still working: the sweep resumes with visibility
+    assert pane.sweep_running()
+    pane.set_working(False)
+    pane.hide()
+    assert not pane.sweep_running()
+
+
+def test_working_on_hidden_pane_defers_animation(qtbot):
+    widget = SpectrumPane()
+    qtbot.addWidget(widget)
+    widget.resize(*PANE_SIZE)
+    widget.set_working(True)  # pane never shown — nothing must tick
+    assert not widget.sweep_running()
+    with qtbot.waitExposed(widget):
+        widget.show()
+    assert widget.sweep_running()
+    widget.set_working(False)
+    assert not widget.sweep_running()
+
+
+# ---------------------------------------------------------------------------
+# Idempotency
+# ---------------------------------------------------------------------------
+
+
+def test_set_view_is_idempotent(pane):
+    vm = populated_vm()
+    pane.set_view(vm)
+    viewbox = pane._plot.getPlotItem().getViewBox()
+    items_before = len(viewbox.addedItems)
+    children_before = len(pane.findChildren(QObject))
+
+    pane.set_view(vm)
+    assert len(viewbox.addedItems) == items_before
+    assert len(pane.findChildren(QObject)) == children_before
+    x, y = pane._curve.getData()
+    np.testing.assert_allclose(y, vm.spectrum_db)
+
+
+def test_view_transitions_create_no_items(pane):
+    viewbox = pane._plot.getPlotItem().getViewBox()
+    items_before = len(viewbox.addedItems)
+    for vm in (populated_vm(), silent_vm(), EMPTY_SIGNAL_VIEW, populated_vm()):
+        pane.set_view(vm)
+    assert len(viewbox.addedItems) == items_before

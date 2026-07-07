@@ -502,9 +502,58 @@ class TestReadout:
         r = build_tempo_view(make_result(loudness=loud), None, CONFIDENT).readout
         assert r.lufs_text == "−∞"
 
-    def test_m2_metrics_are_absence_never_zero(self):
+    def test_m2_metrics_are_absence_without_signal_result(self):
+        # Three-arg call (every pre-M2 caller) — metrics stay em-dashed.
         r = build_tempo_view(make_result(), None, CONFIDENT).readout
         assert (r.dr_text, r.sub_text, r.width_text) == (EM_DASH, EM_DASH, EM_DASH)
+
+
+# ---------------------------------------------------------------------------
+# M2 SignalResult → rail dr/sub/width (the 4th argument, R-M2-16)
+# ---------------------------------------------------------------------------
+
+
+class TestReadoutSignalMetrics:
+    """The worker-composed SignalResult lights up the rail's M2 rows."""
+
+    def _signal_result(self, **kw):
+        from tests.ui.test_signal_view import make_signal_result
+
+        return make_signal_result(**kw)
+
+    def test_signal_result_populates_dr_sub_width(self):
+        sr = self._signal_result(crest=8.2, sub=21.0, width=62.0)
+        r = build_tempo_view(make_result(), None, CONFIDENT, sr).readout
+        assert (r.dr_text, r.sub_text, r.width_text) == ("8.2", "21 %", "62 %")
+
+    def test_mono_width_is_a_measured_zero(self):
+        sr = self._signal_result(width=0.0, correlation=None)
+        r = build_tempo_view(make_result(), None, CONFIDENT, sr).readout
+        assert r.width_text == "0 %"  # a measurement, never absence (R-M2-4)
+
+    def test_silence_shares_are_absence(self):
+        from tests.ui.test_signal_view import silent_signal_result
+
+        r = build_tempo_view(no_tempo_result(), None, state(VerdictKind.NO_TEMPO),
+                             silent_signal_result()).readout
+        # crest NaN / sub NaN / stereo width NaN — all absence, never 0.
+        assert (r.dr_text, r.sub_text, r.width_text) == (EM_DASH, EM_DASH, EM_DASH)
+
+    def test_working_nulls_signal_result_too(self):
+        # Regression (R-M2-16): a WORKING re-analysis still has file A's
+        # SignalResult in the session — its numbers must not survive.
+        sr = self._signal_result()
+        vm = build_tempo_view(make_result(), make_features(), state(VerdictKind.WORKING), sr)
+        r = vm.readout
+        assert (r.dr_text, r.sub_text, r.width_text) == (EM_DASH, EM_DASH, EM_DASH)
+
+    def test_error_nulls_signal_result_too(self):
+        # File B's failure must not wear file A's DR/Sub/Width.
+        sr = self._signal_result()
+        st = state(VerdictKind.ERROR, error_msg="could not decode")
+        r = build_tempo_view(make_result(), make_features(), st, sr).readout
+        assert (r.dr_text, r.sub_text, r.width_text) == (EM_DASH, EM_DASH, EM_DASH)
+        assert r.verdict.word == "ERROR"
 
 
 # ---------------------------------------------------------------------------
@@ -623,6 +672,40 @@ class TestSessionVerdictWiring:
             "features_stored": True,
             "verdict_kind": VerdictKind.CONFIDENT,
         }
+
+    def test_finish_defaults_signal_result_to_none(self, session):
+        # Keyword-additive contract (R-M2-15): every pre-M2 4-arg caller
+        # keeps working and reads back an honest None.
+        session.begin("/tmp/beat.wav")
+        session.finish(make_result(), None, None, 1.0)
+        assert session.last_signal_result is None
+
+    def test_finish_stores_signal_result_before_reducing(self, session):
+        """Ordering contract extended (R-M2-15): last_signal_result is set in
+        the fields-FIRST phase, so a verdict_changed subscriber rebuilding
+        views already sees the fresh metrics."""
+        marker = object()  # any payload — the session never inspects it
+        observed = {}
+
+        def on_verdict(st):
+            if st.kind is VerdictKind.CONFIDENT:
+                observed["signal_result_stored"] = session.last_signal_result is marker
+
+        session.verdict_changed.connect(on_verdict)
+        session.begin("/tmp/beat.wav")
+        session.finish(make_result(), None, None, 1.0, signal_result=marker)
+        assert observed == {"signal_result_stored": True}
+        assert session.last_signal_result is marker
+
+    def test_fail_keeps_previous_signal_result_untouched(self, session):
+        # fail() keeps payload fields (the reason the WORKING/ERROR blank
+        # rule exists in the view-models, not here).
+        marker = object()
+        session.begin("/tmp/a.wav")
+        session.finish(make_result(), None, None, 1.0, signal_result=marker)
+        session.begin("/tmp/b.wav")
+        session.fail("boom")
+        assert session.last_signal_result is marker
 
     def test_signal_sequence_on_finish(self, session):
         events = []

@@ -45,13 +45,20 @@ from rai_ui.state.formatters import (
     fmt_bpm,
     fmt_dbfs,
     fmt_dbtp,
+    fmt_dr,
     fmt_lufs,
+    fmt_pct,
     relationship_chip,
 )
 from rai_ui.state.verdict import INITIAL, VerdictKind, VerdictState
 
 if TYPE_CHECKING:  # engine objects appear in annotations only — no runtime dep
     import numpy as np
+
+# The WORKING/ERROR blank rule's kinds (rulings R-M1-3 / R-M2-16), shared with
+# rai_ui.state.signal_view so the Overview/Signal builders blank on exactly
+# the same states as the tempo surfaces — one truth, one instrument doctrine.
+BLANK_VERDICT_KINDS: tuple[VerdictKind, ...] = (VerdictKind.WORKING, VerdictKind.ERROR)
 
 # The tempogram's fixed x-domain: the engine's BPM grid (config.bpm_grid_min/
 # max, 40–240 step 0.25 → 801 points). The axis never zooms or pans (C-16),
@@ -147,9 +154,9 @@ class ReadoutView:
     lufs_text: str
     dbtp_text: str
     dbfs_text: str
-    dr_text: str  # all "—" in M1 (M2 metrics)
-    sub_text: str
-    width_text: str
+    dr_text: str  # M2: crest 1 dp ("8.2"); "—" without a SignalResult
+    sub_text: str  # M2: "21 %"; "—" absent (NaN share on silence is absence)
+    width_text: str  # M2: "62 %" / mono "0 %" (a measurement); "—" absent
 
 
 @dataclass(frozen=True)
@@ -321,12 +328,24 @@ def _verdict_view(verdict_state: VerdictState, result) -> VerdictView:
     )
 
 
-def _readout(verdict_view: VerdictView, result, has_tempo: bool) -> ReadoutView:
+def _readout(verdict_view: VerdictView, result, has_tempo: bool, signal_result) -> ReadoutView:
     tempo = getattr(result, "tempo", None)
     primary = tempo.primary_bpm if (tempo is not None and has_tempo) else None
     felt = tempo.felt_bpm if (tempo is not None and has_tempo) else None
 
     loudness = getattr(result, "loudness", None)
+
+    # M2 metrics from the worker-composed SignalResult (R-M2-16). Absence is
+    # an em-dash until a fresh SignalResult exists; the formatters carry the
+    # C-06 policy for the values themselves (crest NaN on silence → "—",
+    # mono width 0.0 → "0 %" — a measurement, never absence).
+    if signal_result is not None:
+        dr_text = fmt_dr(signal_result.dynamics.crest_db)
+        sub_text = fmt_pct(signal_result.bands.sub_pct)
+        width_text = fmt_pct(signal_result.stereo.width_pct)
+    else:
+        dr_text = sub_text = width_text = EM_DASH
+
     return ReadoutView(
         verdict=verdict_view,
         primary_text=fmt_bpm(primary),  # em-dash when absent (C-06)
@@ -335,20 +354,25 @@ def _readout(verdict_view: VerdictView, result, has_tempo: bool) -> ReadoutView:
         lufs_text=fmt_lufs(loudness.lufs_i if loudness is not None else None),
         dbtp_text=fmt_dbtp(loudness.true_peak_dbtp if loudness is not None else None),
         dbfs_text=fmt_dbfs(loudness.sample_peak_dbfs if loudness is not None else None),
-        dr_text=EM_DASH,  # M2 metrics: absence, never 0, never −∞ (ruling R12)
-        sub_text=EM_DASH,
-        width_text=EM_DASH,
+        dr_text=dr_text,
+        sub_text=sub_text,
+        width_text=width_text,
     )
 
 
-def build_tempo_view(result, features, verdict_state: Optional[VerdictState]) -> TempoViewModel:
+def build_tempo_view(
+    result, features, verdict_state: Optional[VerdictState], signal_result=None
+) -> TempoViewModel:
     """Build the Tempo section's complete view-model.
 
     ``result`` is an ``rai_analyzer.contracts.AnalysisResult`` (or ``None``
     before the first analysis), ``features`` the matching ``Features`` payload
     the worker delivered (or ``None`` — e.g. shell tests drive the session
-    with bare results), and ``verdict_state`` the session's reduced
-    ``VerdictState`` (``None`` falls back to the reducer's INITIAL).
+    with bare results), ``verdict_state`` the session's reduced
+    ``VerdictState`` (``None`` falls back to the reducer's INITIAL), and
+    ``signal_result`` the worker-composed ``SignalResult`` metrics record (or
+    ``None`` — metrics are best-effort and every pre-M2 caller passes three
+    arguments, which must keep working).
     """
     if verdict_state is None:
         verdict_state = INITIAL
@@ -359,10 +383,13 @@ def build_tempo_view(result, features, verdict_state: Optional[VerdictState]) ->
     # file (the rail numerals have no covering overlay, and a failed
     # analysis of file B must not resurrect file A's numbers under B's
     # name). Absence (—) until a fresh measurement lands; the instrument
-    # never shows a number it didn't just measure.
-    if verdict_state.kind in (VerdictKind.WORKING, VerdictKind.ERROR):
+    # never shows a number it didn't just measure. The M2 signal_result is
+    # nulled in the same breath (R-M2-16) — file B's failure must not wear
+    # file A's DR/Sub/Width either.
+    if verdict_state.kind in BLANK_VERDICT_KINDS:
         result = None
         features = None
+        signal_result = None
 
     tempo = getattr(result, "tempo", None)
     has_result = result is not None
@@ -385,7 +412,7 @@ def build_tempo_view(result, features, verdict_state: Optional[VerdictState]) ->
         curve_salience=curve.salience if curve is not None else None,
         candidates=_candidate_rows(tempo) if has_tempo else (),
         markers=_markers(tempo) if has_tempo else (),
-        readout=_readout(verdict_view, result, has_tempo),
+        readout=_readout(verdict_view, result, has_tempo, signal_result),
     )
 
 

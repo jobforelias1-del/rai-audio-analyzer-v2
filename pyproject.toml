@@ -23,7 +23,7 @@ dev = ["pytest>=7.0"]
 rai-analyze = "rai_analyzer.cli:main"
 
 [tool.setuptools]
-packages = ["rai_analyzer", "rai_analyzer.evidence"]
+packages = ["rai_analyzer", "rai_analyzer.evidence", "rai_analyzer.metrics"]
 
 [tool.setuptools.package-data]
 rai_analyzer = ["fingerprints/*.json"]

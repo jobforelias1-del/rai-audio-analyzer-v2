@@ -1,7 +1,7 @@
-"""Offscreen preview-shot harness for the M1 Tempo lane.
+"""Offscreen preview-shot harness for the Tempo (M1) + Overview/Signal (M2) lanes.
 
 Renders the REAL app (create_app: fonts, theme QSS, pyqtgraph config) at
-1280×860 offscreen, drives it through the M1 states with REAL analyses on
+1280×860 offscreen, drives it through the M1/M2 states with REAL analyses on
 synthesized WAVs, and saves window grabs as PNGs — the closest thing to
 screenshots a headless review can get. RC (and Elias) eyeball these against
 the approved Console mock.
@@ -15,6 +15,12 @@ Shots, in order:
     04-tempo-bridge  the same result with the readout collapsed to the bridge
     05-no-tempo      a silent WAV — neutral no-periodicity state
     06-report        the classic report section (byte-verbatim text view)
+    07-overview      the M2 Overview section on the drill result (cards +
+                     waveform)
+    08-signal        the M2 Signal section on the drill result (spectrum +
+                     metric cards)
+    09-signal-silence  the Signal section on the silent WAV (−∞ vs — + chips,
+                     R-M2-8 spectrum copy)
     gate-<fixture>   one Tempo shot per acceptance-gate WAV present on disk
                      (validation/ground_truth.py paths; the WAVs are
                      .gitignored so this is existence-guarded)
@@ -171,6 +177,20 @@ def main(argv: list[str]) -> int:
 
         window.nav.set_current("Report")
         shot("06-report")
+
+        # M2 appends (R-M2-19 — existing names above stay untouched): the
+        # Overview/Signal sections on the drill result, then Signal on the
+        # silent WAV. Shots 01–06 still render exactly what they did in M1;
+        # the drill re-analysis below only feeds the new frames.
+        _run_analysis(app, window, drill_wav)
+        window.nav.set_current("Overview")
+        shot("07-overview")
+        window.nav.set_current("Signal")
+        shot("08-signal")
+
+        _run_analysis(app, window, silent_wav)
+        window.nav.set_current("Signal")
+        shot("09-signal-silence")
 
         # Acceptance-gate fixtures, if the producer has them on disk.
         from validation.ground_truth import available_tracks

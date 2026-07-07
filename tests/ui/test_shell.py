@@ -14,7 +14,9 @@ pytest.importorskip("pytestqt")
 from PySide6.QtCore import QMimeData, QPoint, QPointF, QSettings, Qt, QUrl, qInstallMessageHandler
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 
+OVERVIEW_PAGE = 1  # hero=0, Overview=1 (real section as of M2)
 TEMPO_PAGE = 2  # hero=0, Overview=1, Tempo=2 (real section as of M1)
+SIGNAL_PAGE = 3  # hero=0, Overview=1, Tempo=2, Signal=3 (real as of M2)
 REPORT_PAGE = 5  # hero=0, Overview..Compare=1..4, Report=5
 
 
@@ -169,13 +171,20 @@ def test_result_updates_chrome_and_lands_on_tempo(window, qtbot):
     assert window.report_section.text_edit.toPlainText() == result.to_report()
 
 
-def test_tempo_placeholder_replaced_by_real_section(window):
+def test_placeholders_replaced_by_real_sections(window):
+    from rai_ui.sections.overview import OverviewSection
+    from rai_ui.sections.signal import SignalSection
     from rai_ui.sections.tempo import TempoSection
 
-    # Tempo is a real section as of M1; the other placeholders remain honest.
-    assert set(window._placeholders) == {"Overview", "Signal", "Compare"}
+    # Tempo is real as of M1, Overview/Signal as of M2; Compare remains the
+    # one honest placeholder (M4).
+    assert set(window._placeholders) == {"Compare"}
+    assert isinstance(window.stack.widget(OVERVIEW_PAGE), OverviewSection)
+    assert window.stack.widget(OVERVIEW_PAGE) is window.overview_section
     assert isinstance(window.stack.widget(TEMPO_PAGE), TempoSection)
     assert window.stack.widget(TEMPO_PAGE) is window.tempo_section
+    assert isinstance(window.stack.widget(SIGNAL_PAGE), SignalSection)
+    assert window.stack.widget(SIGNAL_PAGE) is window.signal_section
 
 
 def test_failure_shows_toast_not_modal(window, qtbot):

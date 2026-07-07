@@ -172,6 +172,69 @@ def test_all_formatters_share_the_policy(f):
 
 
 # ---------------------------------------------------------------------------
+# M2 signal-metric formatters (fmt_pct / fmt_dr / fmt_mmss)
+# ---------------------------------------------------------------------------
+
+
+def test_fmt_pct_demo_values_verbatim():
+    # Console demo strings (04:682/690/699): 62 % · 21 % · 10.5 % · 0 %.
+    assert fm.fmt_pct(62.0) == "62 %"
+    assert fm.fmt_pct(21.0) == "21 %"
+    assert fm.fmt_pct(10.5) == "10.5 %"
+    assert fm.fmt_pct(0.0) == "0 %"
+
+
+def test_fmt_pct_rounds_to_one_decimal_then_trims():
+    assert fm.fmt_pct(61.96) == "62 %"
+    assert fm.fmt_pct(61.94) == "61.9 %"
+    assert fm.fmt_pct(-0.04) == "0 %"  # never a signed zero
+
+
+def test_fmt_pct_absence_policy():
+    # A NaN share (silence) is absence — it must never render "0 %".
+    assert fm.fmt_pct(None) == "—"
+    assert fm.fmt_pct(float("nan")) == "—"
+
+
+def test_fmt_dr_demo_values_verbatim():
+    # Console demo DR strings: 8.2 · 15.6 (1 dp, no trim — "8.0" stays "8.0").
+    assert fm.fmt_dr(8.21) == "8.2"
+    assert fm.fmt_dr(15.6) == "15.6"
+    assert fm.fmt_dr(8.0) == "8.0"
+
+
+def test_fmt_dr_doubles_as_rms_formatter():
+    # The DR card caption's RMS value uses the same 1 dp form: −16.4.
+    assert fm.fmt_dr(-16.42) == "−16.4"
+    assert "-" not in fm.fmt_dr(-16.42)  # U+2212, never the hyphen
+
+
+def test_fmt_dr_silence_policy():
+    # Crest is NaN on silence → absence; RMS is −∞ → a measurement.
+    assert fm.fmt_dr(float("nan")) == "—"
+    assert fm.fmt_dr(None) == "—"
+    assert fm.fmt_dr(float("-inf")) == "−∞"
+
+
+def test_fmt_mmss_basic():
+    assert fm.fmt_mmss(194.9) == "3:14"  # floored, never rounded up
+    assert fm.fmt_mmss(6.0) == "0:06"
+    assert fm.fmt_mmss(0.0) == "0:00"
+    assert fm.fmt_mmss(60.0) == "1:00"
+
+
+def test_fmt_mmss_minutes_unbounded():
+    assert fm.fmt_mmss(4499.0) == "74:59"  # no h:mm:ss form in the design
+
+
+def test_fmt_mmss_absence_policy():
+    assert fm.fmt_mmss(None) == "—"
+    assert fm.fmt_mmss(float("nan")) == "—"
+    assert fm.fmt_mmss(float("inf")) == "—"
+    assert fm.fmt_mmss(-1.0) == "—"
+
+
+# ---------------------------------------------------------------------------
 # Unavailability chips
 # ---------------------------------------------------------------------------
 

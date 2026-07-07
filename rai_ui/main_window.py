@@ -1,6 +1,6 @@
 """RAI v3 main window: chrome, section stack, drag-drop, and analysis wiring.
 
-Composition (M1, normal titled window — no native chrome integration):
+Composition (M1/M2, normal titled window — no native chrome integration):
 
     HeaderBar                                  (48px, C-01)
     MeterBridge                                (76px, C-02 — collapsed mode only)
@@ -8,8 +8,8 @@ Composition (M1, normal titled window — no native chrome integration):
     StatusBar                                  (28px, C-04)
 
 Stack pages: 0 = first-run hero (no nav button — unreachable after the first
-result), then Overview placeholder, the real Tempo section (M1), the
-Signal/Compare placeholders, then the Report section, in nav order.
+result), then the real Overview (M2), Tempo (M1), and Signal (M2) sections,
+the Compare placeholder, then the Report section, in nav order.
 
 The readout rail and the meter bridge are MainWindow-level chrome (ruling
 R10): the rail persists across sections and hides only on the hero page; the
@@ -22,10 +22,11 @@ QThread -> generation-gated completion -> SessionState.finish/fail -> UI
 slots react to session signals. The generation counter is the whole
 concurrency story for M0/M1: rapid re-drops simply orphan the older worker
 and its result is dropped on arrival. Every ``verdict_changed`` rebuilds the
-Tempo view-model from the session (the payload fields are already stored
-when it fires — the session's documented ordering contract) and pushes it to
-the Tempo section, the rail, and the bridge, so the three surfaces can never
-disagree.
+Tempo, Overview, and Signal view-models from the session in one fan-out
+(``_refresh_views`` — the payload fields, including ``last_signal_result``
+and ``last_signal_obj``, are already stored when it fires: the session's
+documented ordering contract) and pushes them to the three sections, the
+rail, and the bridge, so no two surfaces can ever disagree.
 
 M3 seams (ruling R6): hear / tiebreak / undo render live-looking and always
 answer — MainWindow resolves their signals to the "arrives in M3" toasts.
@@ -44,12 +45,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from rai_ui.sections.overview import OverviewSection
 from rai_ui.sections.placeholder import PlaceholderSection
 from rai_ui.sections.report import ReportSection
+from rai_ui.sections.signal import SignalSection
 from rai_ui.sections.tempo import TempoSection
 from rai_ui.services import recent_files
 from rai_ui.services.worker import AnalysisWorker
 from rai_ui.state.session import SessionState
+from rai_ui.state.signal_view import build_overview_view, build_signal_view
 from rai_ui.state.tempo_view import build_tempo_view
 from rai_ui.widgets.empty_state import EmptyStateHero
 from rai_ui.widgets.header import HeaderBar, format_file_meta
@@ -66,14 +70,15 @@ FILE_DIALOG_FILTER = "Audio files (*.wav *.aiff *.aif *.flac *.mp3)"
 
 # Stack layout: hero first, then sections in nav order.
 HERO_PAGE = 0
+OVERVIEW_PAGE = 1 + SECTIONS.index("Overview")
 TEMPO_PAGE = 1 + SECTIONS.index("Tempo")
+SIGNAL_PAGE = 1 + SECTIONS.index("Signal")
 REPORT_PAGE = 1 + SECTIONS.index("Report")
 
 # Placeholder titles per the approved C-18 copy — honest milestone promises.
-# Tempo shipped in M1 and is constructed as a real section below.
+# Tempo shipped in M1, Overview/Signal in M2; all three are constructed as
+# real sections below.
 _PLACEHOLDER_TITLES = {
-    "Overview": "Metric cards arrive in M1",
-    "Signal": "Spectrum · stereo · dynamics arrive in M2",
     "Compare": "A/B compare arrives in M4",
 }
 
@@ -133,6 +138,12 @@ class MainWindow(QMainWindow):
             elif name == "Tempo":
                 self.tempo_section = TempoSection(self)
                 self.stack.addWidget(self.tempo_section)
+            elif name == "Overview":
+                self.overview_section = OverviewSection(self)
+                self.stack.addWidget(self.overview_section)
+            elif name == "Signal":
+                self.signal_section = SignalSection(self)
+                self.stack.addWidget(self.signal_section)
             else:
                 page = PlaceholderSection(_PLACEHOLDER_TITLES[name], parent=self)
                 self._placeholders[name] = page
@@ -171,6 +182,8 @@ class MainWindow(QMainWindow):
 
         self.session.working.connect(self.status.set_working)
         self.session.working.connect(self.tempo_section.set_working)
+        self.session.working.connect(self.overview_section.set_working)
+        self.session.working.connect(self.signal_section.set_working)
         self.session.working.connect(self._on_working)
         self.session.verdict_changed.connect(self._on_verdict_changed)
         self.session.result_ready.connect(self._on_result_ready)
@@ -190,8 +203,8 @@ class MainWindow(QMainWindow):
         )
         self._apply_rail_mode()
 
-        # First paint of the tempo surfaces from the (empty) session.
-        self._refresh_tempo_views()
+        # First paint of every section surface from the (empty) session.
+        self._refresh_views()
 
         # Drag-drop init is a plain flag set, but the status bar promises the
         # capability, so report honestly if the platform refuses it.
@@ -256,10 +269,14 @@ class MainWindow(QMainWindow):
         worker = self.sender()
         return worker is not None and getattr(worker, "_generation", None) == self._generation
 
-    def _on_worker_finished(self, result, features, signal_obj, seconds) -> None:
+    def _on_worker_finished(
+        self, result, features, signal_obj, seconds, signal_result=None
+    ) -> None:
         if not self._sender_is_current():
             return  # stale: a newer analysis superseded this one
-        self.session.finish(result, features, signal_obj, seconds)
+        self.session.finish(
+            result, features, signal_obj, seconds, signal_result=signal_result
+        )
 
     def _on_worker_failed(self, message: str) -> None:
         if not self._sender_is_current():
@@ -307,21 +324,46 @@ class MainWindow(QMainWindow):
     def _on_section_selected(self, index: int) -> None:
         self.stack.setCurrentIndex(index + 1)  # +1: hero occupies page 0
 
-    def _refresh_tempo_views(self) -> None:
-        """Rebuild the one Tempo view-model and fan it out to all surfaces."""
-        vm = build_tempo_view(
-            self.session.last_result,
-            self.session.last_features,
-            self.session.verdict_state,
+    def _refresh_views(self) -> None:
+        """Rebuild all three section view-models and fan them out.
+
+        One derivation point per section (build_tempo_view /
+        build_overview_view / build_signal_view), all fed from the same
+        session snapshot in one pass, so the Tempo surfaces, the Overview
+        cards, the Signal cards, the rail, and the bridge can never show
+        different numbers for the same measurement.
+        """
+        session = self.session
+        tempo_vm = build_tempo_view(
+            session.last_result,
+            session.last_features,
+            session.verdict_state,
+            session.last_signal_result,
         )
-        self.tempo_section.set_view(vm)
-        self.rail.set_view(vm.readout)
-        self.bridge.set_view(vm.readout)
+        self.tempo_section.set_view(tempo_vm)
+        self.rail.set_view(tempo_vm.readout)
+        self.bridge.set_view(tempo_vm.readout)
+
+        self.overview_section.set_view(
+            build_overview_view(
+                session.last_result,
+                session.last_signal_obj,
+                session.last_signal_result,
+                session.verdict_state,
+            )
+        )
+        self.signal_section.set_view(
+            build_signal_view(
+                session.last_result,
+                session.last_signal_result,
+                session.verdict_state,
+            )
+        )
 
     def _on_verdict_changed(self, _state) -> None:
         # The session stores payload fields BEFORE reducing (its documented
         # ordering contract), so rebuilding here always sees fresh data.
-        self._refresh_tempo_views()
+        self._refresh_views()
 
     def _on_working(self, active: bool) -> None:
         # The file chip names the file being analyzed from the moment work
