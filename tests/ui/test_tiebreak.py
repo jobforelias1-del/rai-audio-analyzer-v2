@@ -564,3 +564,71 @@ class TestSectionBubbling:
         assert section.candidates.tiebreak.isVisible()
         section.close_tiebreak()
         assert not section.candidates.tiebreak.isVisible()
+
+
+# ---------------------------------------------------------------------------
+# Wire-stage widget APIs: clear_selection (undo, 04:862) + preview_ended
+# (the ClickPreview.stopped feedback path — findings 7/10/15)
+# ---------------------------------------------------------------------------
+
+
+class TestClearSelection:
+    def test_clear_selection_resets_chrome_and_footer(self, qtbot, shown_overlay):
+        qtbot.mouseClick(shown_overlay.cards[1], Qt.MouseButton.LeftButton)
+        assert shown_overlay.chosen_index == 1
+        shown_overlay.clear_selection()
+        assert shown_overlay.chosen_index is None
+        assert not any(card.selected for card in shown_overlay.cards)
+        assert shown_overlay.confirm_button.text() == CONFIRM_DISABLED_TEXT
+
+    def test_clear_selection_keeps_a_running_preview(self, qtbot, shown_overlay):
+        # Selection and preview are independent state (C-14 verbatim):
+        # clearing the choice must not stop the audible A/B audition.
+        qtbot.mouseClick(shown_overlay.cards[1], Qt.MouseButton.LeftButton)
+        qtbot.mouseClick(
+            shown_overlay.cards[0].preview_button, Qt.MouseButton.LeftButton
+        )
+        stops = recorded(shown_overlay.preview_stop_requested)
+        shown_overlay.clear_selection()
+        assert shown_overlay.preview_index == 0
+        assert stops == []
+
+    def test_clear_selection_is_idempotent(self, qtbot, shown_overlay):
+        shown_overlay.clear_selection()  # nothing chosen — a quiet no-op
+        assert shown_overlay.chosen_index is None
+        shown_overlay.clear_selection()
+        assert shown_overlay.confirm_button.text() == CONFIRM_DISABLED_TEXT
+
+
+class TestPreviewEnded:
+    def test_preview_ended_resets_card_without_emitting_stop(
+        self, qtbot, shown_overlay
+    ):
+        # The engine already stopped (natural EOF): the reset must NOT echo
+        # a preview_stop_requested back into the stopped engine.
+        qtbot.mouseClick(
+            shown_overlay.cards[1].preview_button, Qt.MouseButton.LeftButton
+        )
+        assert shown_overlay.preview_index == 1
+        stops = recorded(shown_overlay.preview_stop_requested)
+        shown_overlay.preview_ended()
+        assert shown_overlay.preview_index is None
+        assert shown_overlay.cards[1].preview_button.text() == PREVIEW_IDLE_TEXT
+        assert not shown_overlay.cards[1].preview_button.pulse_running
+        assert stops == []
+
+    def test_preview_ended_keeps_selection(self, qtbot, shown_overlay):
+        qtbot.mouseClick(shown_overlay.cards[2], Qt.MouseButton.LeftButton)
+        qtbot.mouseClick(
+            shown_overlay.cards[2].preview_button, Qt.MouseButton.LeftButton
+        )
+        shown_overlay.preview_ended()
+        assert shown_overlay.chosen_index == 2
+        assert shown_overlay.cards[2].selected
+
+    def test_preview_ended_is_idempotent(self, qtbot, shown_overlay):
+        stops = recorded(shown_overlay.preview_stop_requested)
+        shown_overlay.preview_ended()  # nothing previewing — a quiet no-op
+        shown_overlay.preview_ended()
+        assert shown_overlay.preview_index is None
+        assert stops == []

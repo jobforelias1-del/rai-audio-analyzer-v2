@@ -108,6 +108,65 @@ def test_confirmed_bpm_matching_no_row_still_recomputes():
     assert vm.markers[0].bpm == 99.0
 
 
+def test_post_relearn_reopen_confirmed_bpm_off_grid_renders_coherently():
+    """KNOWN BEHAVIOR (adversarial-review finding, documented in the module
+    docstring of rai_ui.state.tempo_view): a relearn re-ranks candidates, so
+    re-opening a confirmed file can boot the stored FINE-resolution bpm
+    (153.85) while the fresh list only carries the coarse 0.25-grid row
+    (153.75) — 0.1 outside the 0.01 detector. The view must never crash and
+    every verdict surface must stay coherent: CONFIRMED · HUMAN word + copy,
+    readout primary and tempogram marker at the CONFIRMED bpm, all chips
+    recomputed against it — and simply NO raised/pill row in the table
+    (exact-match-or-nothing on purpose; a synthetic row would show a number
+    the engine did not rank)."""
+    confirmed = 153.85  # the review's live-repro value
+    tempo = TempoResult(
+        primary_bpm=PRIMARY,
+        felt_bpm=FELT,
+        candidates=[
+            Candidate(bpm=PRIMARY, score=1.86, salience=0.912),
+            Candidate(bpm=153.75, score=1.50, salience=0.800),  # coarse grid only
+            Candidate(bpm=CONFIRMED, score=1.20, salience=0.700),
+        ],
+        ambiguous=True,
+        ambiguity_reason="primary 205 is outside the drill band",
+    )
+    result = AnalysisResult(
+        path="/tmp/beat.wav", duration=6.0, sr=44100, channels=2, tempo=tempo
+    )
+    state = VerdictState(
+        kind=VerdictKind.CONFIRMED_HUMAN,
+        path="/tmp/beat.wav",
+        confirmed_bpm=confirmed,
+        prev_kind=VerdictKind.AMBIGUOUS,
+    )
+    vm = build_tempo_view(result, None, state)  # must not raise
+
+    # No row matches → NO pill row, NO raised primary row (the accepted gap).
+    assert all(not r.is_primary for r in vm.candidates)
+    assert all(not r.confirmed_human for r in vm.candidates)
+
+    # …but the verdict surfaces stay one coherent story around 153.85.
+    assert vm.readout.verdict.kind == "confirmed_human"
+    assert vm.readout.verdict.word == "CONFIRMED · HUMAN"
+    assert vm.readout.verdict.reasons == (
+        "you chose 153.85 — saved as ground truth",
+    )
+    assert vm.readout.verdict.show_undo is True
+    assert vm.readout.verdict.show_tiebreak is False
+    assert vm.readout.primary_text == "153.85"
+    assert vm.markers[0].kind == "primary"
+    assert vm.markers[0].bpm == confirmed
+    assert vm.markers[0].label == "153.85 · PRIMARY"
+    # Every chip is a relation of the confirmed bpm (one effective primary).
+    by_bpm = {r.bpm: r for r in vm.candidates}
+    assert by_bpm[153.75].chip.text == relationship_chip(153.75, confirmed)
+    assert by_bpm[PRIMARY].chip.text == relationship_chip(PRIMARY, confirmed)
+    # Felt stays the engine measurement; its chip recomputes vs 153.85.
+    assert vm.readout.felt_text == "102.57"
+    assert vm.readout.felt_chip.text == relationship_chip(FELT, confirmed)
+
+
 def test_confirmed_row_tolerance_is_a_hundredth():
     """04:737's detector: |candidate − confirmed| < 0.01."""
     state = VerdictState(

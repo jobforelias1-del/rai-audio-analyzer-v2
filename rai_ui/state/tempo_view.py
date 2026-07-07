@@ -32,6 +32,20 @@ Doctrine enforced here (so the widgets cannot get it wrong):
   over the UNTOUCHED engine result. Felt stays the engine value (04
   executable truth over wireframe F4); only its relation chip recomputes.
 
+  KNOWN BEHAVIOR (adversarial-review finding, pinned by test): after a
+  relearn (or any profile change) re-ranks the candidates, re-opening a
+  confirmed file can produce a candidate list in which NO row matches the
+  stored confirmed bpm within ``_CONFIRMED_ROW_TOL`` — e.g. a fine-resolution
+  153.85 was confirmed, but the fresh list only carries the coarse 0.25-grid
+  153.75. The view stays coherent by design: the verdict block reads
+  CONFIRMED · HUMAN, the readout primary and the tempogram marker carry the
+  confirmed bpm (they are derived from ``confirmed_bpm`` directly, not from a
+  row), the chips all recompute against it — and the table simply renders
+  with NO raised primary row and NO ✓ HUMAN pill. That "no pill row" state
+  is accepted: the confirmed truth is the stored record, not a row's
+  identity, and inventing a synthetic row (or pinning the pill to the
+  nearest row) would show a number the engine did not rank. Never a crash.
+
 Pure Python + numpy only: PySide6/pyqtgraph imports are FORBIDDEN here so the
 module is unit-testable headless and collectable by the Qt-less engine CI
 job. The engine (``rai_analyzer``) is imported lazily for its config
@@ -221,8 +235,12 @@ def _felt_chip(felt_bpm: float, primary_bpm: float) -> ChipView:
 
 
 # The 04 demo's confirmed-row detector: |candidate − confirmed| < 0.01
-# (Console CO:737). The confirmed bpm comes from a tiebreak card, i.e. one of
-# the ranked candidates, so a real confirmation always matches a row.
+# (Console CO:737). The confirmed bpm comes from a tiebreak card, so it
+# matches a row for as long as the candidate list is the one confirmed
+# against — but a relearn/profile change can re-rank the fresh list so that
+# NO row matches (the stored fine-resolution bpm vs a coarse 0.25-grid row).
+# That renders CONFIRMED · HUMAN with no primary/pill row — the documented
+# known behavior in the module docstring, exact-match-or-nothing on purpose.
 _CONFIRMED_ROW_TOL = 0.01
 
 

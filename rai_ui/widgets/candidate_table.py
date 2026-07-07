@@ -696,7 +696,28 @@ class CandidatePane(QFrame):
 
     def resizeEvent(self, event) -> None:  # noqa: N802 — Qt naming
         super().resizeEvent(event)
-        if self.tiebreak.isVisible():
+        self._sync_tiebreak_geometry()
+
+    def showEvent(self, event) -> None:  # noqa: N802 — Qt naming
+        # Returning to this stack page with the overlay still open (R-M3-8
+        # keeps nav from closing it) must re-cover the pane at its CURRENT
+        # size — geometry may have changed while we were the hidden page.
+        super().showEvent(event)
+        self._sync_tiebreak_geometry()
+
+    def _sync_tiebreak_geometry(self) -> None:
+        """Keep an explicitly-shown overlay covering the whole pane.
+
+        The test is ``not isHidden()`` — deliberately NOT ``isVisible()``:
+        while this pane sits on a background stack page the overlay's
+        effective visibility is False even though it is explicitly shown,
+        yet QStackedLayout keeps resizing background pages. The old
+        ``isVisible()`` guard skipped exactly those resizes, so the overlay
+        came back at stale geometry after open → nav away → resize → return
+        (adversarial-review live repro: back at 798×398 in an 1100×600
+        window, live ▶ hear cells exposed around a nominally modal overlay).
+        """
+        if not self.tiebreak.isHidden():
             self.tiebreak.set_target_geometry(self._tiebreak_rect())
             self.tiebreak.raise_()
 

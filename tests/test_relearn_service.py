@@ -16,8 +16,10 @@ body runs. The packaged fingerprint must remain byte-identical throughout
 
 from __future__ import annotations
 
+import copy
 import json
 import os
+import threading
 
 import pytest
 
@@ -264,6 +266,229 @@ def test_abort_leaves_an_existing_profile_untouched(tmp_path):
     with open(gts.user_profile_path(), "rb") as fh:
         assert fh.read() == before
     assert not os.path.exists(gts.user_profile_backup_path())
+
+
+# ---------------------------------------------------------------------------
+# Atomic publish: crash windows leave the previous state intact
+# (adversarial-review fixes — non-atomic in-place write, no-rollback save)
+# ---------------------------------------------------------------------------
+
+
+def _profile_bytes() -> bytes:
+    with open(gts.user_profile_path(), "rb") as fh:
+        return fh.read()
+
+
+def _store_tmp_files(store_dir: str) -> list[str]:
+    if not os.path.isdir(store_dir):
+        return []
+    return [n for n in os.listdir(store_dir) if ".tmp-" in n]
+
+
+def test_save_exception_mid_dump_leaves_previous_profile_intact(
+    tmp_path, isolated_store, monkeypatch
+):
+    """Disk-full (or any exception) INSIDE save_fingerprint tears only the
+    staged temp file — the live profile survives byte-identical (the review's
+    live-repro: partial JSON prefix then OSError 28)."""
+    confirm_three(tmp_path)
+    relearn.run_relearn()
+    before = _profile_bytes()
+
+    confirm_wav(tmp_path, "click120.wav", 120.0)
+
+    def torn_save(fingerprint, path):
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write('{"low": [0.1')  # a torn prefix, then the disk fills
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(fp_engine, "save_fingerprint", torn_save)
+    with pytest.raises(OSError):
+        relearn.run_relearn()
+
+    assert _profile_bytes() == before  # live profile untouched
+    assert gts.validate_profile_file(gts.user_profile_path()) is True
+    assert not os.path.exists(gts.user_profile_backup_path())  # no half-transaction
+    assert _store_tmp_files(isolated_store) == []  # staged temp cleaned up
+
+
+def test_crash_between_temp_write_and_replace_leaves_old_profile(
+    tmp_path, isolated_store
+):
+    """The review's demanded crash-window test: die between the staged write
+    and the atomic replace — the old profile must still be the live one."""
+    confirm_three(tmp_path)
+    relearn.run_relearn()
+    before = _profile_bytes()
+    confirm_wav(tmp_path, "click120.wav", 120.0)
+
+    class SimulatedCrash(RuntimeError):
+        pass
+
+    def crashing_replace(src, dst):
+        raise SimulatedCrash("killed between temp-write and replace")
+
+    # A scoped context (NOT the shared function monkeypatch — undoing that
+    # would also undo the autouse store isolation) so os.replace is restored
+    # before the post-crash assertions below.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(relearn.os, "replace", crashing_replace)
+        with pytest.raises(SimulatedCrash):
+            relearn.run_relearn()
+
+    assert _profile_bytes() == before  # old profile intact, never torn
+    assert gts.validate_profile_file(gts.user_profile_path()) is True
+    # The backup (written just before the replace) is the same old profile,
+    # so a revert after the crash is still safe and content-preserving.
+    if os.path.exists(gts.user_profile_backup_path()):
+        with open(gts.user_profile_backup_path(), "rb") as fh:
+            assert fh.read() == before
+    assert _store_tmp_files(isolated_store) == []
+
+
+def test_staged_validation_failure_writes_nothing(tmp_path, isolated_store):
+    """Validation now runs on the STAGED file: a failure means the live
+    profile was never opened for writing, and no backup is created."""
+    confirm_three(tmp_path)
+    relearn.run_relearn()
+    before = _profile_bytes()
+    confirm_wav(tmp_path, "click120.wav", 120.0)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(gts, "validate_profile_file", lambda path: False)
+        with pytest.raises(relearn.RelearnError) as excinfo:
+            relearn.run_relearn()
+
+    assert "previous state untouched" in str(excinfo.value)
+    assert _profile_bytes() == before
+    assert not os.path.exists(gts.user_profile_backup_path())
+    assert _store_tmp_files(isolated_store) == []
+
+
+def test_cache_cleared_exactly_once_and_after_the_replace(tmp_path, monkeypatch):
+    """clear_fingerprint_cache() must run exactly once per successful relearn,
+    AFTER the atomic replace — the on-disk profile at clear time is already
+    the new one (so a racing reader can never re-poison the cache with a
+    profile the clear was meant to evict)."""
+    confirm_three(tmp_path)
+    relearn.run_relearn()
+
+    confirm_wav(tmp_path, "click120.wav", 120.0)
+    real_clear = fp_engine.clear_fingerprint_cache
+    seen_n_tracks: list[int] = []
+
+    def counting_clear():
+        with open(gts.user_profile_path(), "r", encoding="utf-8") as fh:
+            seen_n_tracks.append(json.load(fh)["_meta"]["n_tracks"])
+        real_clear()
+
+    monkeypatch.setattr(fp_engine, "clear_fingerprint_cache", counting_clear)
+    relearn.run_relearn()
+
+    assert seen_n_tracks == [4]  # exactly once, and the NEW profile is live
+
+
+# ---------------------------------------------------------------------------
+# Cancellation: a cancelled run writes NOTHING
+# ---------------------------------------------------------------------------
+
+
+def test_cancel_after_first_file_writes_nothing(tmp_path):
+    state = {"done": 0}
+
+    def progress(done: int, total: int) -> None:
+        state["done"] = max(state["done"], done)
+
+    confirm_three(tmp_path)
+    with pytest.raises(relearn.RelearnCancelled):
+        relearn.run_relearn(progress=progress, cancelled=lambda: state["done"] >= 1)
+
+    assert state["done"] == 1  # cancelled between file 1 and file 2
+    assert not os.path.exists(gts.user_profile_path())
+    assert not os.path.exists(gts.user_profile_backup_path())
+
+
+def test_cancel_after_last_build_still_writes_nothing(tmp_path):
+    # The pre-write check: even a cancel that lands after ALL features are
+    # built (but before the write phase) must leave the disk untouched.
+    state = {"done": 0}
+
+    def progress(done: int, total: int) -> None:
+        state["done"] = max(state["done"], done)
+
+    confirm_three(tmp_path)
+    with pytest.raises(relearn.RelearnCancelled):
+        relearn.run_relearn(progress=progress, cancelled=lambda: state["done"] >= 3)
+
+    assert state["done"] == 3
+    assert not os.path.exists(gts.user_profile_path())
+
+
+def test_cancelled_rerun_leaves_existing_profile_and_backup_alone(tmp_path):
+    confirm_three(tmp_path)
+    relearn.run_relearn()
+    before = _profile_bytes()
+
+    with pytest.raises(relearn.RelearnCancelled) as excinfo:
+        relearn.run_relearn(cancelled=lambda: True)
+
+    assert str(excinfo.value) == relearn.CANCELLED_MESSAGE
+    assert isinstance(excinfo.value, relearn.RelearnError)  # worker-catchable
+    assert _profile_bytes() == before
+    assert not os.path.exists(gts.user_profile_backup_path())
+
+
+# ---------------------------------------------------------------------------
+# Concurrent-reader safety: os.replace publishes old-or-new, never torn
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_reader_never_sees_torn_profile(tmp_path, monkeypatch):
+    """Reader threads hammer validate_profile_file while relearn republishes
+    the profile in a tight loop; with the atomic publish, every single read
+    validates. (The DSP is stubbed so each iteration is milliseconds — the
+    point is the write pattern, not the audio; no real audio runs, per the
+    house rules.)"""
+    confirm_three(tmp_path)
+    relearn.run_relearn()  # a real seed profile to re-serialize
+    profile_path = gts.user_profile_path()
+    seed = copy.deepcopy(fp_engine.load_fingerprint(profile_path))
+
+    import rai_analyzer.io_audio as io_audio
+    import rai_analyzer.tempogram as tempogram
+
+    monkeypatch.setattr(io_audio, "load_audio", lambda path: object())
+    monkeypatch.setattr(tempogram, "build_features", lambda signal, cfg: object())
+    monkeypatch.setattr(
+        fp_engine, "learn_fingerprint", lambda items, cfg: copy.deepcopy(seed)
+    )
+
+    stop = threading.Event()
+    invalid_reads: list[int] = []
+    checks = {"n": 0}
+
+    def reader() -> None:
+        while not stop.is_set():
+            if not gts.validate_profile_file(profile_path):
+                invalid_reads.append(checks["n"])
+            checks["n"] += 1
+
+    readers = [threading.Thread(target=reader) for _ in range(2)]
+    for t in readers:
+        t.start()
+    try:
+        for _ in range(40):  # 40 atomic republishes under reader fire
+            report = relearn.run_relearn()
+            assert report.learned == 3
+    finally:
+        stop.set()
+        for t in readers:
+            t.join()
+
+    assert invalid_reads == []  # never torn: old bytes or new bytes only
+    assert checks["n"] > 100  # the hammer actually hammered
+    assert gts.validate_profile_file(profile_path) is True
 
 
 # ---------------------------------------------------------------------------

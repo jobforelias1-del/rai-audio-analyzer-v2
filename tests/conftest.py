@@ -7,6 +7,8 @@ session-scoped and cached.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pytest
 
@@ -14,6 +16,36 @@ from rai_analyzer.config import DEFAULT_CONFIG
 from rai_analyzer.io_audio import AudioSignal
 from rai_analyzer.synthetic import as_signal, click_track, drill_pattern, write_wav
 from rai_analyzer.tempogram import build_features
+
+# --- R-M3-2 tripwire (root/engine mirror of tests/ui/conftest.py's) ---------
+# The real per-user store dir, computed independently of
+# rai_ui.services.ground_truth_store (whose factory tests monkeypatch), so
+# the tripwire cannot be fooled by the very redirection it polices.
+_REAL_APP_SUPPORT = os.path.expanduser(
+    os.path.join("~", "Library", "Application Support", "RAI Audio Analyzer")
+)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _real_app_support_tripwire_root():
+    """Fail the session if any test CREATED the real App Support dir.
+
+    Writing the user's real ground-truth store from a test is branded a hard
+    defect (R-M3-2); before this fixture the defense was pure convention
+    (every harness monkeypatching one ``_store_dir`` symbol) with zero
+    detectors. Read-only stats only — if the dir legitimately pre-exists
+    (the shipped app has been used on this machine), existence cannot detect
+    contamination and the fixture stays silent instead of false-positiving.
+    """
+    existed_before = os.path.exists(_REAL_APP_SUPPORT)
+    yield
+    if not existed_before:
+        assert not os.path.exists(_REAL_APP_SUPPORT), (
+            "HARD DEFECT (R-M3-2): this test run CREATED the user's real "
+            f"ground-truth store at {_REAL_APP_SUPPORT!r} — some code path "
+            "resolved the store location without the injectable "
+            "ground_truth_store._store_dir factory."
+        )
 
 
 @pytest.fixture(scope="session")

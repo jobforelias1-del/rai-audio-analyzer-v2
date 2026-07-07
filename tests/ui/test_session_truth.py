@@ -24,7 +24,7 @@ from rai_analyzer.contracts import AnalysisResult, Candidate, TempoResult
 
 from rai_ui.services import ground_truth_store as gts
 from rai_ui.state import verdict
-from rai_ui.state.session import SessionState
+from rai_ui.state.session import ConfirmOutcome, SessionState
 
 MD5_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 MD5_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -67,7 +67,8 @@ def test_confirm_transitions_persists_and_broadcasts():
     seen = []
     session.verdict_changed.connect(lambda s: seen.append(s))
 
-    session.confirm(102.5)
+    outcome = session.confirm(102.5)
+    assert outcome == ConfirmOutcome(accepted=True, persisted=True, reason=None)
 
     state = session.verdict_state
     assert state.kind is verdict.VerdictKind.CONFIRMED_HUMAN
@@ -104,23 +105,30 @@ def test_confirm_illegal_state_is_a_logged_noop():
     session = SessionState()  # NO_FILE — nothing on screen to confirm
     seen = []
     session.verdict_changed.connect(lambda s: seen.append(s))
-    session.confirm(120.0)
+    outcome = session.confirm(120.0)
     assert session.verdict_state.kind is verdict.VerdictKind.NO_FILE
     assert seen == []  # no broadcast for a refused event
     assert gts.effective_truths() == {}  # and nothing journaled
+    assert outcome.accepted is False and outcome.persisted is False
+    assert "nothing to confirm" in outcome.reason
 
 
 def test_confirm_without_md5_transitions_but_does_not_persist():
     session = SessionState()
     run_analysis(session, md5=None)
-    session.confirm(120.0)
+    outcome = session.confirm(120.0)
     assert session.verdict_state.kind is verdict.VerdictKind.CONFIRMED_HUMAN
     assert gts.effective_truths() == {}
+    # The outcome tells the toast layer the truth: accepted, NOT persisted.
+    assert outcome == ConfirmOutcome(
+        accepted=True, persisted=False, reason="no file hash"
+    )
 
 
 def test_confirm_survives_store_write_failure(monkeypatch):
     """A disk hiccup must not eat the user's click: the in-session confirm
-    stands, the failure is logged (never raised)."""
+    stands, the failure is logged (never raised) — and reported honestly in
+    the outcome."""
     session = SessionState()
     run_analysis(session)
 
@@ -128,8 +136,19 @@ def test_confirm_survives_store_write_failure(monkeypatch):
         raise OSError("disk full")
 
     monkeypatch.setattr(gts, "append_confirm", _boom)
-    session.confirm(102.5)
+    outcome = session.confirm(102.5)
     assert session.verdict_state.kind is verdict.VerdictKind.CONFIRMED_HUMAN
+    assert outcome.accepted is True and outcome.persisted is False
+    assert outcome.reason == "journal write failed: disk full"
+
+
+def test_confirm_outcome_is_frozen():
+    """The outcome object is a shared contract — immutability is part of it."""
+    import dataclasses
+
+    outcome = ConfirmOutcome(accepted=True, persisted=True, reason=None)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        outcome.persisted = False
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +163,8 @@ def test_undo_restores_prev_kind_and_writes_retraction():
     seen = []
     session.verdict_changed.connect(lambda s: seen.append(s))
 
-    session.undo()
+    outcome = session.undo()
+    assert outcome == ConfirmOutcome(accepted=True, persisted=True, reason=None)
 
     assert session.verdict_state.kind is verdict.VerdictKind.AMBIGUOUS
     assert session.verdict_state.confirmed_bpm is None
@@ -161,21 +181,45 @@ def test_undo_illegal_state_is_a_logged_noop():
     run_analysis(session)  # AMBIGUOUS — nothing confirmed
     seen = []
     session.verdict_changed.connect(lambda s: seen.append(s))
-    session.undo()
+    outcome = session.undo()
     assert session.verdict_state.kind is verdict.VerdictKind.AMBIGUOUS
     assert seen == []
     assert not os.path.exists(gts.journal_path())  # nothing ever journaled
+    assert outcome.accepted is False and outcome.persisted is False
+    assert "nothing to undo" in outcome.reason
 
 
 def test_undo_writes_no_retraction_when_journal_absent():
     session = SessionState()
     run_analysis(session, md5=None)
     session.confirm(120.0)  # not persisted (no md5)
-    session.undo()
+    outcome = session.undo()
     assert session.verdict_state.kind is verdict.VerdictKind.AMBIGUOUS
     import os
 
     assert not os.path.exists(gts.journal_path())
+    assert outcome == ConfirmOutcome(
+        accepted=True, persisted=False, reason="no file hash"
+    )
+
+
+def test_undo_survives_store_write_failure(monkeypatch):
+    """A failed retraction write must not raise — and the outcome must say
+    the retraction did NOT land (the confirmation resurrects on next boot)."""
+    session = SessionState()
+    run_analysis(session)
+    session.confirm(102.5)
+
+    def _boom(md5):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(gts, "append_retract", _boom)
+    outcome = session.undo()
+    assert session.verdict_state.kind is verdict.VerdictKind.AMBIGUOUS
+    assert outcome.accepted is True and outcome.persisted is False
+    assert outcome.reason == "journal write failed: disk full"
+    # The journal was never retracted — the store still holds the truth.
+    assert gts.lookup(MD5_A).bpm == 102.5
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +309,24 @@ def test_fields_first_ordering_includes_md5():
     session.verdict_changed.connect(lambda s: seen.append(session.last_md5))
     session.finish(make_result(), None, None, 1.0, md5=MD5_A)
     assert seen[-1] == MD5_A
+
+
+def test_finish_survives_torn_multibyte_journal():
+    """The review's brick scenario: a crash-torn multibyte byte in the
+    journal must NOT propagate out of the store lookup inside ``finish`` —
+    the completion lands, the verdict resolves, working(False) fires."""
+    gts.append_confirm(md5=MD5_A, bpm=102.5, name="beat.wav")
+    with open(gts.journal_path(), "ab") as fh:
+        fh.write(b'{"v": 1, "kind": "confirm", "name": "caf\xe9\n')  # torn é
+
+    session = SessionState()
+    flags = []
+    session.working.connect(lambda w: flags.append(w))
+    run_analysis(session)  # must not raise
+    assert flags[-1] is False  # the session is not stuck at WORKING
+    # The intact confirmation before the torn line still boots the overlay.
+    assert session.verdict_state.kind is verdict.VerdictKind.CONFIRMED_HUMAN
+    assert session.verdict_state.confirmed_bpm == 102.5
 
 
 def test_no_tempo_wins_over_stored_truth():

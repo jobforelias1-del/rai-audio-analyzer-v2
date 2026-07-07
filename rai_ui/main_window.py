@@ -39,15 +39,29 @@ one place the widget signals meet the services:
   ONE shared :class:`ClickPreview` engine and fires the verbatim design toast
   (R-M3-10); the overlay's preview buttons drive the same engine;
 * overlay ``confirm_requested`` -> ``session.confirm(bpm)`` (reducer + journal
-  append) + the design toast; ``undo_requested`` (candidates header ghost /
-  rail / bridge inline links) -> ``session.undo()`` + the design toast — the
-  session owns the transitions (R-M3-17/20);
+  append) + a toast that BRANCHES on the returned :class:`ConfirmOutcome`
+  (persistence honesty — the design toast only fires when a journal record
+  actually landed; an accepted-but-unpersisted confirm/undo gets the RC
+  "session only" copy, a refused one gets no toast); ``undo_requested``
+  (candidates header ghost / rail / bridge inline links) -> ``session.undo()``
+  with the same outcome branching — the session owns the transitions
+  (R-M3-17/20). Undo additionally CLEARS the tiebreak selection (04:862
+  ``chosenIdx:null`` — confirm KEEPS it, undo is the one clearing transition);
 * the header genre chip opens the profile popover (R-M3-11); its relearn /
   revert signals drive the :class:`RelearnController` (progress on the status
-  bar, completion toasts per R-M3-16);
+  bar, one terminal ``finished(ok, message)`` toast per R-M3-16);
+* mutual exclusion (adversarial-review fix): while a relearn is running every
+  analysis entry point (drop/browse/recents/``open_path``) refuses with a
+  toast, and while an analysis is in flight (WORKING) relearn refuses with a
+  toast — the engine's fingerprint load cache is path-keyed and content-blind,
+  so letting the two overlap can tear a resolve mid-flight (these gates are
+  load-bearing, not cosmetic);
 * click-preview lifecycle: ``begin``/``fail`` clear the engine (stale premixes
   from the previous file must never keep playing), a fresh result re-arms it
-  with the new Features/PCM; closing the overlay stops playback (R-M3-8).
+  with the new Features/PCM; closing the overlay stops playback (R-M3-8). The
+  engine's ``stopped`` signal (natural EOF, device death, external stop) feeds
+  back into the overlay so a card can never keep pulsing "previewing" over
+  silence.
 """
 
 from __future__ import annotations
@@ -71,6 +85,7 @@ from rai_ui.sections.tempo import TempoSection
 from rai_ui.services import recent_files
 from rai_ui.services.click_preview import ClickPreview
 from rai_ui.services.relearn import (
+    RELEARN_DONE_MESSAGE_FMT,
     RelearnController,
     RelearnError,
     profile_state,
@@ -78,6 +93,7 @@ from rai_ui.services.relearn import (
 )
 from rai_ui.services.worker import AnalysisWorker
 from rai_ui.state.session import SessionState
+from rai_ui.state.verdict import VerdictKind
 from rai_ui.state.signal_view import build_overview_view, build_signal_view
 from rai_ui.state.tempo_view import build_tempo_view
 from rai_ui.widgets.empty_state import EmptyStateHero
@@ -110,11 +126,25 @@ _PLACEHOLDER_TITLES = {
 
 # M3 toast copy — verbatim design copy on the single always-neutral slot
 # (R-M3-16; the verdict block is the semantic voice, toasts only confirm).
+# The design toasts fire ONLY when the journal record actually landed
+# (ConfirmOutcome.persisted); a confirm/undo the reducer accepted but the
+# store could not persist (no file hash, or the append raised) gets the
+# honest RC "session only" copy instead — the UI never asserts a persistence
+# that never happened (adversarial-review finding, persistence honesty).
 TOAST_CONFIRM = "Ground truth saved — the engine learns from this"
 TOAST_UNDO = "Reverted — verdict back to AMBIGUOUS"
-# Relearn has no designed surface — RC copy of record (R-M3-16).
-TOAST_RELEARN_DONE_FMT = "Profile relearned from {n} confirmed tracks"
+TOAST_CONFIRM_SESSION_ONLY = "Confirmed — session only (couldn't save to disk)"
+TOAST_UNDO_SESSION_ONLY = "Reverted — session only (couldn't save to disk)"
+# Relearn has no designed surface — RC copy of record (R-M3-16). The success
+# message aliases the controller's own terminal copy so they cannot diverge.
+TOAST_RELEARN_DONE_FMT = RELEARN_DONE_MESSAGE_FMT
 TOAST_PROFILE_REVERTED = "Reverted to previous profile"
+# Analysis ⇄ relearn mutual exclusion (RC copy — no designed surface). The
+# gates are load-bearing: the engine's fingerprint load cache is path-keyed
+# and content-blind, so an analysis racing a relearn's profile publish can
+# score one verdict against two different profiles (review finding 18).
+TOAST_RELEARN_BLOCKED_BY_ANALYSIS = "Analysis running — relearn once it finishes"
+TOAST_ANALYSIS_BLOCKED_BY_RELEARN = "Relearning — drop ignored until it finishes"
 
 
 def hear_toast(bpm: float) -> str:
@@ -253,8 +283,15 @@ class MainWindow(QMainWindow):
         self.profile_popover.relearn_requested.connect(self._on_relearn_requested)
         self.profile_popover.revert_requested.connect(self._on_revert_requested)
         self.relearn.progress.connect(self._on_relearn_progress)
+        # The controller's single terminal signal: finished(ok, message) for
+        # success, failure AND cancellation — there is no failed signal.
         self.relearn.finished.connect(self._on_relearn_finished)
-        self.relearn.failed.connect(self._on_relearn_failed)
+
+        # Playback-state honesty (findings 7/10/15): the engine's ``stopped``
+        # signal — natural EOF, device death, or an external stop — resets the
+        # tiebreak card's ▶/⏸ state so it never pulses "previewing" over
+        # silence and the next click starts fresh instead of dead-toggling.
+        self.click_preview.stopped.connect(self._on_preview_stopped)
 
         # Rail⇄bridge mode: restore the persisted choice (R10), then apply it
         # for the current (hero) page — both surfaces start hidden.
@@ -278,7 +315,18 @@ class MainWindow(QMainWindow):
     # -- opening files ----------------------------------------------------------
 
     def open_path(self, path: str) -> None:
-        """Start (or restart) analysis of ``path`` on a background thread."""
+        """Start (or restart) analysis of ``path`` on a background thread.
+
+        EVERY analysis entry point funnels through here (drop, browse, hero
+        recents, tests), so this is where the relearn⇄analysis mutual
+        exclusion gates the analysis side: a relearn's atomic profile publish
+        plus the engine's path-keyed, content-blind fingerprint cache means a
+        concurrent analysis could score one verdict against two profiles
+        (review finding 18) — refuse honestly with a toast instead.
+        """
+        if self.relearn.is_running():
+            self.toast.show_message(TOAST_ANALYSIS_BLOCKED_BY_RELEARN)
+            return
         self.session.begin(path)
         self._start_analysis(path)
 
@@ -362,7 +410,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.click_preview.stop()  # release the audio stream before teardown
-        self.relearn.close()  # quit+wait the relearn thread (landmine 1)
+        # RelearnController.close() = cancel() + a BOUNDED wait (2 s, never
+        # the old unbounded-in-N 10 s freeze); a straggler is detached and
+        # leaked deliberately rather than qFatal-ing (landmine 1 / review 11).
+        self.relearn.close()
         for thread, _worker in self._threads:
             thread.quit()
             thread.wait(2000)
@@ -516,29 +567,51 @@ class MainWindow(QMainWindow):
         self.tempo_section.open_tiebreak()
 
     def _on_undo_requested(self) -> None:
-        """session.undo() owns the transition (R-M3-17/20); toast on success.
+        """session.undo() owns the transition (R-M3-17/20); outcome-branched
+        toast, and the tiebreak selection is CLEARED.
 
         The reducer's guard is the truth: if nothing was undoable (a stale
         click racing a state change), the state is unchanged and no toast
         fires — "Reverted" must never announce a revert that didn't happen.
+        An accepted undo whose retraction record could not be journaled gets
+        the honest "session only" copy (the confirmation will resurrect on
+        the next boot — the design toast must not promise otherwise).
+
+        Design truth (04:862, recon §2.4): undo sets ``chosenIdx:null`` —
+        confirm KEEPS the selection, dismiss keeps it, undo is the ONE
+        transition that clears it. Without the clear, reopening the overlay
+        after an undo shows the retracted card still selected with the
+        confirm footer armed — one stray Space away from re-saving the very
+        ground truth the user just deliberately retracted.
         """
-        before = self.session.verdict_state
-        self.session.undo()
-        if self.session.verdict_state is not before:
-            self.toast.show_message(TOAST_UNDO)
+        outcome = self.session.undo()
+        if not outcome.accepted:
+            return
+        self.tempo_section.candidates.tiebreak.clear_selection()
+        self.toast.show_message(
+            TOAST_UNDO if outcome.persisted else TOAST_UNDO_SESSION_ONLY
+        )
 
     def _on_confirm_requested(self, bpm: float) -> None:
-        """Overlay confirm -> session.confirm(bpm) + the design toast.
+        """Overlay confirm -> session.confirm(bpm) + the outcome-branched toast.
 
         Confirm stops playback (design §3.3): the overlay already emitted its
         own preview stop, but a table-originated ▶ hear may still be running —
         stop the shared engine outright (idempotent).
+
+        Toast honesty: the design's "Ground truth saved" fires only when the
+        journal append actually landed (``ConfirmOutcome.persisted``); an
+        accepted confirm without a file hash or with a failed write keeps the
+        in-session state (losing the click over a disk hiccup would be worse)
+        but says so — "session only". A refused confirm stays silent.
         """
         self.click_preview.stop()
-        before = self.session.verdict_state
-        self.session.confirm(bpm)
-        if self.session.verdict_state is not before:
-            self.toast.show_message(TOAST_CONFIRM)
+        outcome = self.session.confirm(bpm)
+        if not outcome.accepted:
+            return
+        self.toast.show_message(
+            TOAST_CONFIRM if outcome.persisted else TOAST_CONFIRM_SESSION_ONLY
+        )
 
     def _on_preview_requested(self, bpm: float) -> None:
         # Tiebreak card preview: same engine as ▶ hear; starting one stops the
@@ -548,6 +621,14 @@ class MainWindow(QMainWindow):
 
     def _on_preview_stop_requested(self) -> None:
         self.click_preview.stop()
+
+    def _on_preview_stopped(self) -> None:
+        # The service says playback ended (natural EOF, a device that died,
+        # or an explicit stop that ended live playback): reset the overlay's
+        # card to '▶ preview click grid' WITHOUT re-emitting a stop into the
+        # already-stopped engine. Idempotent — a stop the overlay itself
+        # initiated finds the preview slot already cleared.
+        self.tempo_section.candidates.tiebreak.preview_ended()
 
     def _on_tiebreak_closed(self) -> None:
         # Overlay close stops playback (R-M3-8) — including a table-originated
@@ -573,6 +654,14 @@ class MainWindow(QMainWindow):
 
     def _on_relearn_requested(self) -> None:
         self.profile_popover.hide()
+        # Mutual exclusion, relearn side (review finding 18): while an
+        # analysis is in flight (the session's WORKING truth) a relearn's
+        # profile publish + cache clear could land mid-resolve — candidates
+        # scored before the clear use the old profile, candidates after use
+        # the new one, presented as ONE measurement. Refuse with a toast.
+        if self.session.verdict_state.kind is VerdictKind.WORKING:
+            self.toast.show_message(TOAST_RELEARN_BLOCKED_BY_ANALYSIS)
+            return
         if self.relearn.start():
             # A determinate count arrives with the first progress signal.
             self.status.set_relearn_progress("relearning…")
@@ -580,13 +669,12 @@ class MainWindow(QMainWindow):
     def _on_relearn_progress(self, done: int, total: int) -> None:
         self.status.set_relearn_progress(f"relearning {done}/{total}")
 
-    def _on_relearn_finished(self, report) -> None:
+    def _on_relearn_finished(self, ok: bool, message: str) -> None:
+        # The single terminal path — success ("Profile relearned from N
+        # confirmed tracks"), failure (human RelearnError text verbatim) and
+        # cancellation all arrive here with a toast-ready message.
+        del ok  # the message already carries the outcome, worded for humans
         self.status.set_relearn_progress(None)
-        self.toast.show_message(TOAST_RELEARN_DONE_FMT.format(n=report.learned))
-
-    def _on_relearn_failed(self, message: str) -> None:
-        self.status.set_relearn_progress(None)
-        # RelearnError messages are written for humans and pass verbatim.
         self.toast.show_message(message)
 
     def _on_revert_requested(self) -> None:

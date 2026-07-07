@@ -63,17 +63,24 @@ def window(qtbot, tmp_path, monkeypatch):
     return win
 
 
-def finish_analysis(qtbot, window, result=None, features=None, path="/tmp/beat.wav"):
+def finish_analysis(
+    qtbot, window, result=None, features=None, path="/tmp/beat.wav", md5="f0" * 16
+):
     """begin() then finish() — completions only reduce from WORKING (the
     reducer's stale-completion guard), so verdict-dependent assertions must
-    drive the full lifecycle."""
+    drive the full lifecycle.
+
+    ``md5`` defaults to a fake hash so confirm/undo PERSIST into the per-test
+    temp store (the conftest isolation) and the design toasts fire; pass
+    ``md5=None`` to exercise the honest "session only" degradation.
+    """
     if result is None:
         result = make_result()
     if features is None:
         features = make_features()
     window.session.begin(path)
     with qtbot.waitSignal(window.session.result_ready):
-        window.session.finish(result, features, None, 1.23)
+        window.session.finish(result, features, None, 1.23, md5=md5)
     return result
 
 
@@ -291,6 +298,118 @@ def test_undo_without_confirmation_is_a_silent_no_op(window, qtbot):
     window.rail.undo_requested.emit()
     assert not window.toast.isVisible()
     assert window.rail.verdict_block.view().kind == "confident"
+
+
+# ---------------------------------------------------------------------------
+# Persistence honesty (review finding: the toast branches on ConfirmOutcome —
+# the design copy only when a journal record actually landed)
+# ---------------------------------------------------------------------------
+
+
+def _ambiguous_analysis(qtbot, window, md5="f0" * 16):
+    result = make_result(make_tempo(ambiguous=True, ambiguity_reason=AMBIGUOUS_REASON))
+    finish_analysis(qtbot, window, result=result, md5=md5)
+
+
+def test_confirm_toast_is_design_copy_when_persisted(window, qtbot):
+    import rai_ui.main_window as mw
+
+    window.show()
+    _ambiguous_analysis(qtbot, window)
+    window._on_confirm_requested(155.25)
+    assert window.rail.verdict_block.view().kind == "confirmed_human"
+    assert window.toast.label.text() == mw.TOAST_CONFIRM
+
+
+def test_confirm_without_md5_gets_session_only_toast(window, qtbot):
+    # Worker md5 is best-effort by contract — md5=None is designed-reachable.
+    # The confirmation stands in-session, but nothing was journaled and
+    # nothing will boot CONFIRMED on re-open: the toast must not claim
+    # "the engine learns from this".
+    import rai_ui.main_window as mw
+
+    window.show()
+    _ambiguous_analysis(qtbot, window, md5=None)
+    window._on_confirm_requested(155.25)
+    assert window.rail.verdict_block.view().kind == "confirmed_human"
+    assert window.toast.label.text() == mw.TOAST_CONFIRM_SESSION_ONLY
+
+
+def test_confirm_journal_write_failure_gets_session_only_toast(
+    window, qtbot, monkeypatch
+):
+    import rai_ui.main_window as mw
+    from rai_ui.services import ground_truth_store
+
+    def _boom(**kwargs):
+        raise OSError("disk full")
+
+    window.show()
+    _ambiguous_analysis(qtbot, window)
+    monkeypatch.setattr(ground_truth_store, "append_confirm", _boom)
+    window._on_confirm_requested(155.25)
+    assert window.rail.verdict_block.view().kind == "confirmed_human"  # click kept
+    assert window.toast.label.text() == mw.TOAST_CONFIRM_SESSION_ONLY
+
+
+def test_undo_without_md5_gets_session_only_toast(window, qtbot):
+    # An unjournaled retraction means the confirmation would RESURRECT on
+    # next boot — "Reverted" alone would over-promise.
+    import rai_ui.main_window as mw
+
+    window.show()
+    _ambiguous_analysis(qtbot, window, md5=None)
+    window.session.confirm(155.25)
+    window.rail.undo_requested.emit()
+    assert window.rail.verdict_block.view().kind == "ambiguous"
+    assert window.toast.label.text() == mw.TOAST_UNDO_SESSION_ONLY
+
+
+def test_refused_confirm_shows_no_toast(window, qtbot):
+    # ConfirmOutcome.accepted is False (nothing to confirm in the no-file
+    # state — the reducer's guard is the truth): no toast, nothing changed.
+    window.show()
+    window._on_confirm_requested(155.25)
+    assert not window.toast.isVisible()
+    assert window.rail.verdict_block.view().kind == "no_file"
+
+
+# ---------------------------------------------------------------------------
+# Tiebreak overlay geometry (review finding 9 — the live-repro regression)
+# ---------------------------------------------------------------------------
+
+
+def test_tiebreak_overlay_geometry_survives_resize_on_another_section(window, qtbot):
+    """Open overlay → nav away (R-M3-8 keeps it open) → resize → return:
+    the overlay must cover the pane at its CURRENT size. The old
+    ``isVisible()`` guard skipped background-page resizes and the overlay
+    came back at stale geometry, exposing live ▶ hear cells around a
+    nominally modal surface (adversarial-review live repro)."""
+    from PySide6.QtWidgets import QApplication
+
+    window.show()
+    window.resize(1000, 640)
+    QApplication.processEvents()
+    result = make_result(make_tempo(ambiguous=True, ambiguity_reason=AMBIGUOUS_REASON))
+    finish_analysis(qtbot, window, result=result)
+
+    pane = window.tempo_section.candidates
+    overlay = pane.tiebreak
+    pane.tiebreak_button.click()
+    assert overlay.isVisible()
+
+    window.nav.button("Report").click()  # nav away — overlay stays open
+    assert not overlay.isVisible()  # effective visibility only (page hidden)
+
+    window.resize(1280, 800)  # the pane resizes on the background page
+    QApplication.processEvents()
+
+    window.nav.button("Tempo").click()  # return
+    QApplication.processEvents()
+    assert overlay.isVisible()
+    assert overlay.geometry() == pane.rect().adjusted(1, 1, -1, -1), (
+        "overlay geometry went stale across a hidden-page resize"
+    )
 
 
 # ---------------------------------------------------------------------------

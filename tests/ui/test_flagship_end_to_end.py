@@ -15,6 +15,13 @@ view-model fan-out — no layer mocked except audio):
   user profile written (+ validated), backup on the second run, one-step
   revert, the worker picks the injected profile up (the analyze path
   provably changes) while ``DEFAULT_CONFIG`` stays untouched;
+* the analysis ⇄ relearn mutual exclusion (Wire stage): relearn refuses with
+  a toast while an analysis is in flight, and every analysis entry point
+  refuses with a toast while a relearn runs;
+* playback-state honesty: a natural EOF in the REAL ClickPreview (fake
+  stream, real premix math) resets the tiebreak card to '▶ preview click
+  grid' via the ``stopped`` signal, and the next click starts fresh;
+* undo clears the tiebreak selection while confirm keeps it (04:861/862);
 * the acceptance gate stays byte-identical AFTER a populated journal, a
   relearned user profile, and a revert (the R-M3-13 exit criterion, re-proven
   on top of this module's arcs).
@@ -291,6 +298,188 @@ def test_working_and_error_still_blank_after_confirmation(window, qtbot, tmp_pat
     assert vm.readout.verdict.kind == "error"
     assert vm.readout.primary_text == EM_DASH
     assert vm.candidates == ()
+
+
+def test_undo_clears_tiebreak_selection_confirm_keeps_it(window, qtbot, tmp_path):
+    """Design truth 04:861/862 (recon §2.4): confirm KEEPS chosenIdx, undo
+    CLEARS it — a retracted choice must never reopen armed (one stray Space
+    away from re-saving the ground truth the user just took back)."""
+    from rai_ui.widgets.tiebreak import CONFIRM_DISABLED_TEXT
+
+    window.show()
+    wav = _write_drill(tmp_path, 140.0)
+    _analyze(window, qtbot, wav)
+    pane = window.tempo_section.candidates
+    overlay = pane.tiebreak
+
+    pane.tiebreak_button.click()
+    overlay.cards[1].clicked.emit()
+    assert overlay.chosen_index == 1
+
+    # Confirm: overlay closes, selection SURVIVES (04:861).
+    overlay.confirm_button.click()
+    assert window.session.verdict_state.kind is VerdictKind.CONFIRMED_HUMAN
+    assert overlay.chosen_index == 1
+
+    # Undo through the real header ghost: selection CLEARED (04:862).
+    pane.undo_button.click()
+    assert window.session.verdict_state.kind is VerdictKind.AMBIGUOUS
+    assert overlay.chosen_index is None
+
+    # Reopen: no selected chrome, the 'Pick a candidate' ghost — not an
+    # armed 'Set {bpm} — save as ground truth' footer.
+    pane.tiebreak_button.click()
+    assert overlay.isVisible()
+    assert overlay.chosen_index is None
+    assert overlay.confirm_button.text() == CONFIRM_DISABLED_TEXT
+    assert not any(card.selected for card in overlay.cards)
+
+
+# ---------------------------------------------------------------------------
+# Playback-state honesty: natural EOF resets the card (findings 7/10/15)
+# ---------------------------------------------------------------------------
+
+
+class _FakeStream:
+    """Minimal OutputStream stand-in — plan §3's faked-player doctrine."""
+
+    def __init__(self) -> None:
+        self.active = True
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        self.active = False
+
+    def close(self) -> None:
+        pass
+
+
+@pytest.fixture
+def window_real_preview(qtbot, tmp_path, monkeypatch):
+    """Real MainWindow keeping the REAL ClickPreview (stopped wiring live),
+    with only the sounddevice stream factory swapped for a fake — CI never
+    opens an audio device, but the premix math and the stopped-signal path
+    are the production code."""
+    import rai_ui.main_window as mw
+    from rai_ui.services import recent_files
+
+    monkeypatch.setattr(
+        recent_files,
+        "_settings",
+        lambda: QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat),
+    )
+    monkeypatch.setattr(
+        mw,
+        "_ui_settings",
+        lambda: QSettings(str(tmp_path / "ui.ini"), QSettings.Format.IniFormat),
+    )
+    win = mw.MainWindow()
+    win.click_preview._stream_factory = lambda samplerate, channels, fill: _FakeStream()
+    qtbot.addWidget(win)
+    return win
+
+
+def test_eof_stopped_preview_resets_card_and_next_click_is_live(
+    window_real_preview, qtbot, tmp_path
+):
+    """Natural end-of-buffer → ``stopped`` → card back to '▶ preview click
+    grid', pulse stopped — and the NEXT click starts a fresh preview instead
+    of dead-toggling an already-stopped engine (the review's dead-click
+    repro, findings 7/10/15)."""
+    import numpy as np
+
+    from rai_ui.widgets.tiebreak import PREVIEW_ACTIVE_TEXT, PREVIEW_IDLE_TEXT
+
+    window = window_real_preview
+    engine = window.click_preview
+    window.show()
+    wav = _write_drill(tmp_path, 140.0)
+    _analyze(window, qtbot, wav)
+
+    pane = window.tempo_section.candidates
+    overlay = pane.tiebreak
+    pane.tiebreak_button.click()
+    assert overlay.isVisible()
+
+    # Start a card preview through the real engine (fake stream underneath).
+    overlay.cards[0].preview_button.click()
+    assert overlay.preview_index == 0
+    assert overlay.cards[0].preview_button.text() == PREVIEW_ACTIVE_TEXT
+    assert engine.playing_bpm is not None
+
+    # Natural EOF: drain the whole premix in one audio-callback fill. The
+    # callback only FLAGS the transition (never emits) …
+    with engine._lock:
+        frames, channels = engine._buffer.shape
+    scratch = np.zeros((frames + 16, channels), dtype=np.float32)
+    assert engine._fill(scratch, frames + 16) is True
+    assert engine.playing_bpm is None  # truthful the instant playback ends
+
+    # … and the main-thread poll turns it into exactly one ``stopped``.
+    with qtbot.waitSignal(engine.stopped, timeout=1000):
+        engine._poll_playback()
+
+    # The wiring reset the card: idle copy, no pulse, no phantom preview.
+    assert overlay.preview_index is None
+    assert overlay.cards[0].preview_button.text() == PREVIEW_IDLE_TEXT
+    assert not overlay.cards[0].preview_button.pulse_running
+
+    # Never a dead click: the next press STARTS playback (one click, live).
+    overlay.cards[0].preview_button.click()
+    assert overlay.preview_index == 0
+    assert engine.playing_bpm == pytest.approx(
+        window.tempo_section.view().candidates[0].bpm
+    )
+
+
+# ---------------------------------------------------------------------------
+# Analysis ⇄ relearn mutual exclusion (review finding 18 — load-bearing)
+# ---------------------------------------------------------------------------
+
+
+def test_relearn_refused_while_analysis_in_flight(window, qtbot, tmp_path):
+    """confirm → analysis in flight → relearn request refuses with the toast
+    and starts NO run (the fingerprint cache is path-keyed and content-blind;
+    a mid-resolve publish would mix two profiles into one verdict)."""
+    import rai_ui.main_window as mw
+
+    window.show()
+    wav = _write_drill(tmp_path, 140.0)
+    _analyze(window, qtbot, wav)
+    window.session.confirm(window.tempo_section.view().candidates[0].bpm)
+    assert window.session.verdict_state.kind is VerdictKind.CONFIRMED_HUMAN
+
+    # A second analysis is in flight (WORKING is the session's truth).
+    window.session.begin(wav)
+    assert window.session.verdict_state.kind is VerdictKind.WORKING
+
+    window.profile_popover.relearn_requested.emit()  # the popover button path
+    assert window.toast.label.text() == mw.TOAST_RELEARN_BLOCKED_BY_ANALYSIS
+    assert not window.relearn.is_running()
+    assert "relearning" not in window.status.left_label.text()
+
+
+def test_analysis_refused_while_relearn_running(window, qtbot, tmp_path, monkeypatch):
+    """Every analysis entry point funnels through open_path; while the
+    controller reports a live relearn the drop is refused with the toast and
+    the session is untouched (no begin, no WORKING blank, no worker)."""
+    import rai_ui.main_window as mw
+
+    window.show()
+    wav = _write_drill(tmp_path, 140.0)
+    _analyze(window, qtbot, wav)
+    verdict_before = window.session.verdict_state
+    threads_before = list(window._threads)
+
+    monkeypatch.setattr(window.relearn, "is_running", lambda: True)
+    window.open_path(str(tmp_path / "another.wav"))
+
+    assert window.toast.label.text() == mw.TOAST_ANALYSIS_BLOCKED_BY_RELEARN
+    assert window.session.verdict_state is verdict_before  # no begin happened
+    assert window.session.path == wav
+    assert window._threads == threads_before  # no worker launched
 
 
 # ---------------------------------------------------------------------------

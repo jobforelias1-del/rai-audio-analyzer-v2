@@ -20,7 +20,11 @@ ground-truth store keyed by ``last_md5`` (the worker-computed whole-file
 hash). ``finish`` looks the md5 up in the store and feeds any effective
 confirmation into ``AnalysisOk(confirmed_bpm=...)`` — the display-overlay
 re-open path (D7): the engine result object is never touched. Illegal-state
-calls no-op with a log; the reducer's guards are the truth.
+calls no-op with a log; the reducer's guards are the truth. Both mutation
+entry points return a :class:`ConfirmOutcome` (accepted / persisted /
+reason) so the toast layer can branch on what ACTUALLY happened instead of
+asserting a persistence that may not have occurred; callers ignoring the
+return value stay valid.
 
 Signal contract (shared interface — other agents rely on these exact names):
 
@@ -44,6 +48,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from typing import Optional
 
 from PySide6.QtCore import QObject, Signal
@@ -52,6 +57,31 @@ from rai_ui.services import ground_truth_store
 from rai_ui.state import verdict
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ConfirmOutcome:
+    """What actually happened on a ``confirm()``/``undo()`` call.
+
+    The UI toast layer branches on this (shared contract — the wiring reads
+    these exact fields), so the session never asserts a persistence it does
+    not have:
+
+    * ``accepted``  — the reducer took the event (False = illegal-state no-op,
+      nothing changed, nothing was journaled, nothing broadcast).
+    * ``persisted`` — a journal record actually landed. False with a
+      ``reason`` when there was no file hash to key it (``"no file hash"``)
+      or the append raised (``"journal write failed: ..."``); the in-session
+      state change still stands in those cases (losing the user's click over
+      a disk hiccup would be worse).
+    * ``reason``    — plain-language cause when something degraded, else None.
+
+    Existing callers that ignore the return value stay valid.
+    """
+
+    accepted: bool
+    persisted: bool
+    reason: Optional[str] = None
 
 
 class SessionState(QObject):
@@ -134,7 +164,7 @@ class SessionState(QObject):
         self.result_ready.emit(result)
         self.working.emit(False)
 
-    def confirm(self, bpm: float) -> None:
+    def confirm(self, bpm: float) -> ConfirmOutcome:
         """Human tiebreak: confirm ``bpm`` as this file's ground truth.
 
         Dispatches the reducer ``Confirm`` event and, when the reducer
@@ -145,6 +175,10 @@ class SessionState(QObject):
         logged and the in-session confirmation still stands (losing the
         user's click over a disk hiccup would be worse — the log is the
         diagnosable trail).
+
+        Returns a :class:`ConfirmOutcome` stating what really happened, so
+        the toast layer never claims "saved as ground truth" for a click
+        that was refused or could not be journaled.
         """
         bpm = float(bpm)
         after = verdict.reduce(self.verdict_state, verdict.Confirm(bpm=bpm))
@@ -154,7 +188,13 @@ class SessionState(QObject):
                 bpm,
                 self.verdict_state.kind.value,
             )
-            return
+            return ConfirmOutcome(
+                accepted=False,
+                persisted=False,
+                reason=f"nothing to confirm in state {self.verdict_state.kind.value}",
+            )
+        persisted = False
+        reason: Optional[str] = None
         if self.last_md5:
             try:
                 ground_truth_store.append_confirm(
@@ -163,20 +203,27 @@ class SessionState(QObject):
                     name=os.path.basename(self.path) if self.path else "",
                     path=self.path or "",
                 )
-            except Exception:
+                persisted = True
+            except Exception as exc:
                 log.exception("ground-truth confirm record could not be written")
+                reason = f"journal write failed: {exc}"
         else:
             log.warning("confirm(%.2f) without a file md5 — not persisted", bpm)
+            reason = "no file hash"
         self.verdict_state = after
         self.verdict_changed.emit(after)
+        return ConfirmOutcome(accepted=True, persisted=persisted, reason=reason)
 
-    def undo(self) -> None:
+    def undo(self) -> ConfirmOutcome:
         """Take back the confirmation: reducer ``Undo`` + journal retraction.
 
         The retraction record is what makes undo work across sessions
         (R-M3-1) — replay clears the md5. Same discipline as ``confirm``:
         reducer guards are the truth, persistence precedes broadcast,
-        write failures log instead of crashing.
+        write failures log instead of crashing — and the same
+        :class:`ConfirmOutcome` shape reports whether the retraction
+        actually landed (a failed retraction write means the confirmation
+        will RESURRECT on next boot; the toast layer can say so).
         """
         after = verdict.reduce(self.verdict_state, verdict.Undo())
         if after is self.verdict_state:
@@ -184,14 +231,25 @@ class SessionState(QObject):
                 "undo() ignored — nothing to undo in state %s",
                 self.verdict_state.kind.value,
             )
-            return
+            return ConfirmOutcome(
+                accepted=False,
+                persisted=False,
+                reason=f"nothing to undo in state {self.verdict_state.kind.value}",
+            )
+        persisted = False
+        reason: Optional[str] = None
         if self.last_md5:
             try:
                 ground_truth_store.append_retract(self.last_md5)
-            except Exception:
+                persisted = True
+            except Exception as exc:
                 log.exception("ground-truth retraction could not be written")
+                reason = f"journal write failed: {exc}"
+        else:
+            reason = "no file hash"
         self.verdict_state = after
         self.verdict_changed.emit(after)
+        return ConfirmOutcome(accepted=True, persisted=persisted, reason=reason)
 
     def fail(self, message: str) -> None:
         """An analysis failed; previous results are kept untouched."""

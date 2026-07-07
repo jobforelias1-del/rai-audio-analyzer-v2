@@ -319,6 +319,32 @@ class TestM3TiebreakRampUnderRealTheme:
         font = _polished_font(themed_app, qtbot, overlay, overlay.hint_label)
         _assert_type(font, SANS, 11, 400)  # footer hints 11px (04:336-338)
 
+    def test_footer_save_hint_is_sans_11(self, themed_app, qtbot):
+        # The right footer hint ("saved locally · feeds the engine's
+        # relearning") shares hint_font + type_pin today, but a future edit
+        # restyling it independently would regress invisibly — this is the
+        # drift class the real-QSS gate exists for (review finding 13).
+        overlay = self._overlay()
+        font = _polished_font(themed_app, qtbot, overlay, overlay.save_hint_label)
+        _assert_type(font, SANS, 11, 400)  # footer hints 11px (04:336-338)
+
+    def test_confirm_ghost_button_is_13_600(self, themed_app, qtbot):
+        # The "Pick a candidate" ghost carries its type in inline widget QSS
+        # (13px/600, 04:340-344); widget QSS outranks the app sheet, but the
+        # designed size was unpinned by any test (review finding 13).
+        overlay = self._overlay()
+        font = _polished_font(themed_app, qtbot, overlay, overlay.confirm_button)
+        _assert_type(font, SANS, 13, 600)
+
+    def test_confirm_armed_button_is_13_600(self, themed_app, qtbot):
+        # Same pin for the armed accent state ("Set {bpm} — save as ground
+        # truth") — the restyle swaps the whole stylesheet string.
+        overlay = self._overlay()
+        overlay._choose(0)
+        assert overlay.confirm_button.text().startswith("Set ")
+        font = _polished_font(themed_app, qtbot, overlay, overlay.confirm_button)
+        _assert_type(font, SANS, 13, 600)
+
 
 class TestM3PopoverRampUnderRealTheme:
     def _popover(self):
@@ -357,6 +383,13 @@ class TestM3PopoverRampUnderRealTheme:
         popover = self._popover()
         font = _polished_font(themed_app, qtbot, popover, popover._footer)
         _assert_type(font, SANS, 11, 400)  # designed footer copy (04:83)
+
+    def test_relearn_button_is_13_600(self, themed_app, qtbot):
+        # The relearn action's 13px/600 rides inline widget QSS (the
+        # candidates-header action idiom) — pinned here per review finding 13.
+        popover = self._popover()
+        font = _polished_font(themed_app, qtbot, popover, popover.relearn_button)
+        _assert_type(font, SANS, 13, 600)
 
 
 # ---------------------------------------------------------------------------

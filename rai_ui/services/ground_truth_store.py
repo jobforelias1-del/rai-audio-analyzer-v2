@@ -127,12 +127,27 @@ def _now_iso() -> str:
 def _append(record: dict) -> dict:
     """Append one JSON line to the journal, fsynced (ground truth is
     crash-safe by construction — the append either lands whole or is a
-    corrupt trailing line the replay skips)."""
+    corrupt trailing line the replay skips).
+
+    Torn-line healing: a crash mid-append can leave the file WITHOUT a
+    trailing newline. Gluing the next record onto that fragment would merge
+    both into one unparseable line — replay would then skip the NEW record
+    too (e.g. a retraction, silently resurrecting an undone confirmation).
+    So if the file's last byte isn't ``b"\\n"``, a healing newline is written
+    first: the fragment stays one skippable corrupt line and the new record
+    lands whole on its own line. ``a+b`` mode reads the last byte while every
+    write still lands at end-of-file regardless of seek position.
+    """
     path = journal_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     line = json.dumps(record, ensure_ascii=False)
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(line + "\n")
+    with open(path, "a+b") as fh:
+        fh.seek(0, os.SEEK_END)
+        if fh.tell() > 0:
+            fh.seek(-1, os.SEEK_END)
+            if fh.read(1) != b"\n":
+                fh.write(b"\n")  # heal the torn trailing line
+        fh.write(line.encode("utf-8") + b"\n")
         fh.flush()
         os.fsync(fh.fileno())
     return record
@@ -190,6 +205,12 @@ def effective_truths() -> dict[str, ConfirmedTruth]:
     """Replay the journal: last record per md5 wins, retractions clear.
 
     Corrupt/unrecognised lines are skipped with a warning, never fatal.
+    The file is read in BINARY and each line is decoded INSIDE the per-line
+    guard: a crash-torn append can shear a multibyte character (accented
+    basenames are journaled ``ensure_ascii=False``), and the resulting
+    ``UnicodeDecodeError`` must degrade to a skipped line exactly like torn
+    JSON does — never propagate into ``session.finish``. The outer guard is
+    ``Exception``-wide for the same reason: replay must NEVER raise.
     Returns an md5-keyed dict (first-confirmation journal order preserved for
     md5s that were never cleared, per plain-dict semantics).
     """
@@ -198,12 +219,12 @@ def effective_truths() -> dict[str, ConfirmedTruth]:
     if not os.path.exists(path):
         return truths
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "rb") as fh:
             for lineno, raw in enumerate(fh, 1):
-                line = raw.strip()
-                if not line:
-                    continue
                 try:
+                    line = raw.decode("utf-8").strip()
+                    if not line:
+                        continue
                     rec = json.loads(line)
                     kind = rec["kind"]
                     if kind == "confirm":
@@ -220,7 +241,7 @@ def effective_truths() -> dict[str, ConfirmedTruth]:
                         type(exc).__name__,
                         exc,
                     )
-    except OSError as exc:
+    except Exception as exc:
         # An unreadable journal degrades to "no stored truth", never a crash.
         log.warning("ground truth journal unreadable (%s) — treating as empty", exc)
         return {}

@@ -1,11 +1,18 @@
 """Click-preview service tests (rulings R-M3-8/9/10).
 
 The premix math is pure numpy and tested EXACTLY (tick placement from
-phase + k*period, the −3 dB duck, sample alignment, the >180 s mono fold,
-the LRU-2 cache). Playback runs against a FAKE stream driven by hand — CI
-has no audio device, and ``sounddevice`` is never imported here (the module
-imports it only inside its default factory; AST-pinned below). No Qt either:
-the Qt-less engine venv collects and runs this file.
+phase + k*period, the shared per-FILE level plan — identical music bed for
+every candidate of one file, bed+tick ≤ 0.95 by construction — the EOF
+skip-not-truncate rule, sample alignment, the >180 s mono fold, the LRU-2
+cache). Playback runs against a FAKE stream driven by hand — CI has no
+audio device, and ``sounddevice`` is never imported here (the module
+imports it only inside its default factory; AST-pinned below).
+
+Qt: the service is a QObject with the ``stopped`` signal (playback-state
+honesty — cards must stop pulsing when the buffer runs out), so PySide6 is
+importorskip'd like every other Qt-dependent UI module and the Qt-less
+engine venv skips this file cleanly. The ~250 ms poll behind ``stopped`` is
+driven by calling ``_poll_playback()`` directly — no real timers, no waits.
 
 R-M3-9 is enforced structurally: every fake BeatGrid in this file RAISES if
 ``confidence`` is ever read — a confidence gate cannot creep in without
@@ -25,7 +32,17 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
+pytest.importorskip("PySide6")
+pytest.importorskip("pytestqt")
+
 from rai_ui.services import click_preview as cp
+
+
+@pytest.fixture(autouse=True)
+def _qt_app(qapp):
+    """Every test gets a QApplication: the service owns a QTimer (the
+    playback-state poll), and QObject/QTimer want an app instance."""
+    return qapp
 
 
 # ---------------------------------------------------------------------------
@@ -85,20 +102,26 @@ class _FakeStream:
         self.started = 0
         self.stopped = 0
         self.closed = 0
+        self.active = False  # mirrors sounddevice's OutputStream.active
 
     def start(self) -> None:
         self.started += 1
+        self.active = True
 
     def stop(self) -> None:
         self.stopped += 1
+        self.active = False
 
     def close(self) -> None:
         self.closed += 1
+        self.active = False
 
     def pump(self, frames: int):
         """Drive the callback by hand: returns (block, done)."""
         out = np.zeros((frames, self.channels), dtype=np.float32)
         done = self.fill(out, frames)
+        if done:
+            self.active = False  # the real adapter raises sd.CallbackStop
         return out, done
 
 
@@ -138,6 +161,24 @@ def _mono_signal(seconds=2.0, sr=8000, value=0.0):
     n = int(seconds * sr)
     y = np.full(n, value, dtype=np.float32)
     return _FakeSignal(y_native=y, sr_native=sr, duration=seconds)
+
+
+def _stopped_log(svc) -> list:
+    """Collect ``stopped`` emissions (direct connection — synchronous)."""
+    hits: list = []
+    svc.stopped.connect(lambda: hits.append(True))
+    return hits
+
+
+def _expected_bed(y: np.ndarray) -> np.ndarray:
+    """Replicate the shared per-file level plan exactly (float32 op order
+    mirrors render_premix): duck −3 dB, then one scale to BED_CEILING only
+    if the ducked bed peaks above it."""
+    bed = np.asarray(y, dtype=np.float32) * np.float32(cp.MUSIC_DUCK_GAIN)
+    peak = float(np.max(np.abs(bed))) if bed.size else 0.0
+    if peak > cp.BED_CEILING:
+        bed = bed * np.float32(cp.BED_CEILING / peak)
+    return bed
 
 
 # ---------------------------------------------------------------------------
@@ -215,8 +256,8 @@ class TestRenderPremix:
         assert np.all(quiet == expected_bed)
 
     def test_premix_is_superposition(self):
-        # premix == ducked music + tick track, everywhere, exactly (kept
-        # under the peak ceiling so no normalization muddies the identity).
+        # premix == leveled bed + tick track, everywhere, exactly. Quiet bed:
+        # the bed gain is 1.0, so the duck is the only music op.
         sr, phase, period = 8000, 0.1, 0.4
         rng = np.random.default_rng(7)
         y = (0.02 * rng.standard_normal(int(1.5 * sr))).astype(np.float32)
@@ -226,22 +267,49 @@ class TestRenderPremix:
         k = 0
         while True:
             idx = int(round((phase + k * period) * sr))
-            if idx >= expected.shape[0]:
-                break
-            m = min(tick.shape[0], expected.shape[0] - idx)
-            expected[idx : idx + m] += tick[:m]
+            if idx + tick.shape[0] > expected.shape[0]:
+                break  # the EOF rule: a burst that cannot complete is skipped
+            expected[idx : idx + tick.shape[0]] += tick
             k += 1
         assert np.array_equal(out, expected)
 
-    def test_last_tick_truncates_at_buffer_end(self):
+    def test_final_tick_that_cannot_complete_is_skipped(self):
+        # A burst starting <30 ms before EOF is dropped whole, never sliced
+        # mid-envelope (the no-hard-step EOF rule).
         sr = 8000
         y = np.zeros(sr, dtype=np.float32)  # 1 s
-        phase = 0.99  # tick would run 10 ms past the end — truncate, not grow
+        phase = 0.99  # tick would run 10 ms past the end
         out = cp.render_premix(y, sr, phase, 10.0)
-        tick = cp.render_tick(sr)
-        idx = int(round(phase * sr))
         assert out.shape == y.shape
-        assert np.array_equal(out[idx:], tick[: sr - idx])
+        assert np.all(out == 0.0)  # silent bed stays silent — no partial tick
+
+    def test_final_tick_that_exactly_fits_is_rendered(self):
+        sr = 8000
+        tick = cp.render_tick(sr)
+        y = np.zeros(sr, dtype=np.float32)
+        idx = sr - tick.shape[0]  # burst ends exactly at EOF
+        phase = idx / sr
+        out = cp.render_premix(y, sr, phase, 10.0)
+        assert np.array_equal(out[idx:], tick)
+        assert np.all(out[:idx] == 0.0)
+
+    def test_no_hard_step_at_eof(self):
+        # The bounded-step property: for phases that would land a burst
+        # across EOF, the premix's junction into the stream's zero-padding
+        # never steps harder than the tick's own largest intra-burst step
+        # (the raised-cosine envelope's smoothness budget). On a silent bed
+        # the tail is exactly zero — the old truncation ended at ~0.6 FS.
+        sr = 8000
+        tick = cp.render_tick(sr)
+        tick_step = float(np.max(np.abs(np.diff(tick))))
+        y = np.zeros(sr, dtype=np.float32)
+        for offset in (1, 10, tick.shape[0] // 2, tick.shape[0] - 1):
+            phase = (sr - tick.shape[0] + offset) / sr  # burst overruns EOF
+            out = cp.render_premix(y, sr, phase, 10.0)
+            padded = np.concatenate([out, np.zeros(1, dtype=np.float32)])
+            eof_step = float(np.max(np.abs(np.diff(padded[-2:]))))
+            assert eof_step <= tick_step  # bounded by the envelope budget
+            assert out[-1] == 0.0  # silent bed: skipped burst leaves silence
 
     def test_stereo_tick_on_both_channels(self):
         sr = 8000
@@ -249,7 +317,8 @@ class TestRenderPremix:
         out = cp.render_premix(y, sr, 0.0, 0.5)
         assert out.shape == (sr, 2)
         assert np.array_equal(out[:, 0], out[:, 1])
-        assert float(np.max(np.abs(out))) > 0.5  # ticks landed
+        # Ticks landed at the fixed level-plan amplitude.
+        assert float(np.max(np.abs(out))) >= 0.9 * cp.TICK_AMPLITUDE
 
     def test_mono_fold_folds_stereo(self):
         sr = 1000  # small rate keeps the ">180 s" array tiny
@@ -272,15 +341,75 @@ class TestRenderPremix:
         out = cp.render_premix(y, sr, 0.0, 0.5, fold_mono=True)
         assert out.ndim == 1
 
-    def test_peak_normalized_never_clipped(self):
+    def test_level_plan_headroom_by_construction(self):
+        # The whole point of the shared plan: bed ≤ BED_CEILING and a fixed
+        # tick mean NO premix can clip, with no normalization step to vary.
+        assert cp.BED_CEILING + cp.TICK_AMPLITUDE <= 0.95 + 1e-9
+
+    def test_hot_bed_scaled_once_to_bed_ceiling(self):
+        # Full-scale-mastered material: the ducked bed (0.98·0.708 ≈ 0.694)
+        # still exceeds BED_CEILING, so it is scaled ONCE to exactly 0.55 —
+        # and the premix peak stays ≤ bed + tick = 0.95 even with ticks on
+        # top of the hottest samples.
         sr = 8000
-        y = np.full(sr, 0.98, dtype=np.float32)  # hot music + tick > 1.0 raw
+        y = np.full(sr, 0.98, dtype=np.float32)
         out = cp.render_premix(y, sr, 0.0, 0.25)
+        expected_bed = _expected_bed(y)
+        tick_len = cp.render_tick(sr).shape[0]
+        quiet = out[tick_len : int(0.25 * sr)]  # between the first two ticks
+        assert np.array_equal(quiet, expected_bed[tick_len : int(0.25 * sr)])
+        assert abs(float(expected_bed[0]) - cp.BED_CEILING) < 1e-6
         peak = float(np.max(np.abs(out)))
-        assert peak <= cp.PEAK_CEILING + 1e-6
-        # And it was a scale-down, not a hard clip: the bed moved with it.
-        raw_bed = 0.98 * cp.MUSIC_DUCK_GAIN
-        assert float(out[4000]) < raw_bed
+        assert peak <= cp.BED_CEILING + cp.TICK_AMPLITUDE + 1e-6
+
+    def test_hot_bed_premix_is_exact_superposition(self):
+        # No post-tick normalization exists: even at worst case (ticks on a
+        # ceiling-level bed) the output is exactly bed + tick track.
+        sr = 8000
+        y = np.full(sr, 1.0, dtype=np.float32)
+        phase, period = 0.0, 0.25
+        out = cp.render_premix(y, sr, phase, period)
+        expected = _expected_bed(y)
+        tick = cp.render_tick(sr)
+        k = 0
+        while True:
+            idx = int(round((phase + k * period) * sr))
+            if idx + tick.shape[0] > expected.shape[0]:
+                break
+            expected[idx : idx + tick.shape[0]] += tick
+            k += 1
+        assert np.array_equal(out, expected)
+
+    def test_bed_level_identical_across_candidates(self):
+        # THE A/B honesty rule (the ~3.9 dB swap-jump regression): two
+        # candidates of the SAME hot file — one with ticks on the loud
+        # samples, one offset — must carry a bit-identical music bed. Under
+        # the old per-premix normalization the on-peak candidate's whole
+        # buffer was scaled by ~0.64 while the offset one kept gain 1.0.
+        sr = 8000
+        y = np.full(2 * sr, 1.0, dtype=np.float32)  # full-scale bed
+        out_a = cp.render_premix(y, sr, 0.0, 0.5)  # ticks at 0.0, 0.5, ...
+        out_b = cp.render_premix(y, sr, 0.25, 0.5)  # ticks at 0.25, 0.75, ...
+        tick_len = cp.render_tick(sr).shape[0]
+
+        def bed_mask(phase):
+            mask = np.ones(y.shape[0], dtype=bool)
+            k = 0
+            while True:
+                idx = int(round((phase + k * 0.5) * sr))
+                if idx >= y.shape[0]:
+                    break
+                mask[idx : idx + tick_len] = False
+                k += 1
+            return mask
+
+        both_bed = bed_mask(0.0) & bed_mask(0.25)
+        assert both_bed.any()
+        # Identical bed samples across candidates — exact float equality.
+        assert np.array_equal(out_a[both_bed], out_b[both_bed])
+        # And both sit at the shared per-file level, not a per-premix one.
+        expected_bed = _expected_bed(y)
+        assert np.array_equal(out_a[both_bed], expected_bed[both_bed])
 
     def test_source_array_never_mutated(self):
         sr = 8000
@@ -566,6 +695,172 @@ class TestPremixCache:
 
 
 # ---------------------------------------------------------------------------
+# Playback-state honesty — the ``stopped`` signal (Wire-stage contract)
+# ---------------------------------------------------------------------------
+
+
+class TestStoppedSignal:
+    """``stopped`` fires on every transition to not-playing that is NOT
+    immediately followed by a start — natural EOF, device death, explicit
+    stop — and never from the audio callback. Tests drive the timer's slot
+    (``_poll_playback``) directly instead of waiting out ~250 ms."""
+
+    def test_natural_eof_emits_stopped_once_then_toggle_restarts(self):
+        signal = _mono_signal(seconds=0.1, sr=8000)  # 800 frames
+        svc, _, factory = _service(signal)
+        hits = _stopped_log(svc)
+        svc.preview(150.0)
+        assert svc._poll.isActive()
+        _, done = factory.last.pump(1024)
+        assert done
+        assert svc.playing_bpm is None  # truthful immediately
+        assert hits == []  # the callback NEVER emits; the main-thread poll does
+        svc._poll_playback()
+        assert len(hits) == 1
+        assert not svc._poll.isActive()  # poll stops once delivered
+        svc._poll_playback()  # straggler tick: no double emit
+        assert len(hits) == 1
+        # Truthful state means the next toggle starts FRESH — no dead-click.
+        svc.toggle(150.0)
+        assert svc.playing_bpm == 150.0
+        assert len(factory.streams) == 2
+        assert len(hits) == 1  # starting emits nothing
+
+    def test_explicit_stop_emits_once(self):
+        svc, _, _ = _service(_mono_signal())
+        hits = _stopped_log(svc)
+        svc.preview(150.0)
+        svc.stop()
+        assert hits == [True]
+        svc.stop()  # idempotent: nothing playing, nothing pending
+        assert hits == [True]
+
+    def test_stop_without_playback_never_emits(self):
+        svc, _, _ = _service(_mono_signal())
+        hits = _stopped_log(svc)
+        svc.stop()
+        assert hits == []
+
+    def test_stop_after_unnotified_eof_emits_once(self):
+        # EOF lands, the poll hasn't ticked yet, the user hits stop: the
+        # pending transition is still delivered — exactly once.
+        signal = _mono_signal(seconds=0.1, sr=8000)
+        svc, _, factory = _service(signal)
+        hits = _stopped_log(svc)
+        svc.preview(150.0)
+        factory.last.pump(1024)  # EOF; notification pending
+        svc.stop()
+        assert len(hits) == 1
+        svc._poll_playback()  # delivers nothing more
+        assert len(hits) == 1
+
+    def test_eof_then_immediate_preview_suppresses_pending_emit(self):
+        # The transition WAS followed by a start, so nothing is emitted —
+        # a rapid re-preview after the end never flashes card state.
+        signal = _mono_signal(seconds=0.1, sr=8000)
+        svc, _, factory = _service(signal)
+        hits = _stopped_log(svc)
+        svc.preview(150.0)
+        factory.last.pump(1024)  # EOF; poll hasn't run yet
+        svc.preview(150.0)  # cold restart supersedes the notification
+        assert svc.playing_bpm == 150.0
+        svc._poll_playback()  # playing again: nothing to deliver
+        assert hits == []
+
+    def test_rapid_ab_swap_never_emits(self):
+        sr = 8000
+        signal = _mono_signal(seconds=2.0, sr=sr)
+        est = _PerBpmPhaseEstimator({120.0: 0.0, 160.0: 0.25}, period=0.5)
+        svc, _, factory = _service(signal, estimator=est)
+        hits = _stopped_log(svc)
+        svc.preview(120.0)
+        for bpm in (160.0, 120.0, 160.0, 120.0):
+            factory.last.pump(64)
+            svc.preview(bpm)  # pointer swap: playback never stops
+            svc._poll_playback()  # a poll tick between swaps sees "playing"
+        assert hits == []
+        assert svc.playing_bpm == 120.0
+        assert len(factory.streams) == 1
+
+    def test_device_failure_mid_play_emits_and_resets(self, caplog):
+        svc, _, factory = _service(_mono_signal())
+        hits = _stopped_log(svc)
+        svc.preview(150.0)
+        factory.last.pump(64)
+        factory.last.active = False  # the stream died under us
+        with caplog.at_level(logging.WARNING, logger=cp.__name__):
+            svc._poll_playback()
+        assert hits == [True]
+        assert svc.playing_bpm is None
+        assert "went inactive" in caplog.text
+        assert factory.last.closed == 1  # reaped
+        svc.preview(150.0)  # and the next preview starts fresh
+        assert svc.playing_bpm == 150.0
+        assert len(factory.streams) == 2
+
+    def test_set_source_and_clear_emit_when_playing(self):
+        svc, _, _ = _service(_mono_signal())
+        hits = _stopped_log(svc)
+        svc.preview(150.0)
+        svc.set_source(object(), _mono_signal())  # stops playback → emits
+        assert len(hits) == 1
+        svc.preview(150.0)
+        svc.clear()
+        assert len(hits) == 2
+        svc.clear()  # nothing playing: silent
+        assert len(hits) == 2
+
+    def test_start_failure_emits_stopped(self):
+        # stream.start() raising AFTER state install is a transition with
+        # no following start: emit, so a dead device can't stick a card.
+        class _NoStartStream(_FakeStream):
+            def start(self):
+                raise RuntimeError("device busy")
+
+        class _Factory(_FakeFactory):
+            def __call__(self, samplerate, channels, fill):
+                stream = _NoStartStream(samplerate, channels, fill)
+                self.streams.append(stream)
+                return stream
+
+        svc = cp.ClickPreview(
+            stream_factory=_Factory(), phase_estimator=_FakeEstimator()
+        )
+        svc.set_source(object(), _mono_signal())
+        hits = _stopped_log(svc)
+        svc.preview(150.0)
+        assert svc.playing_bpm is None
+        assert hits == [True]
+
+    def test_factory_failure_does_not_emit(self):
+        # The factory raising means no state was ever installed — playback
+        # never transitioned, so nothing is emitted.
+        def broken_factory(samplerate, channels, fill):
+            raise RuntimeError("no audio device")
+
+        svc = cp.ClickPreview(
+            stream_factory=broken_factory, phase_estimator=_FakeEstimator()
+        )
+        svc.set_source(object(), _mono_signal())
+        hits = _stopped_log(svc)
+        svc.preview(150.0)
+        assert hits == []
+
+    def test_poll_timer_wiring(self):
+        # ~250 ms main-thread poll, active exactly while playing.
+        svc, _, _ = _service(_mono_signal())
+        assert svc._poll.interval() == cp.STOP_POLL_INTERVAL_MS
+        assert not svc._poll.isActive()
+        svc.preview(150.0)
+        assert svc._poll.isActive()
+        svc._poll_playback()  # mid-play tick: keeps running, changes nothing
+        assert svc._poll.isActive()
+        assert svc.playing_bpm == 150.0
+        svc.stop()
+        assert not svc._poll.isActive()
+
+
+# ---------------------------------------------------------------------------
 # R-M3-9 — no confidence gate, structurally and with the real engine
 # ---------------------------------------------------------------------------
 
@@ -649,13 +944,17 @@ def test_sounddevice_import_is_guarded():
         ), "module-level 'from sounddevice import ...' breaks the import guard"
 
 
-def test_module_stays_qt_less_and_sounddevice_less():
-    # The service's own globals bind neither Qt nor sounddevice. (In the
-    # engine venv sounddevice does not even exist, so a stray import would
-    # have failed collection outright — this pins the v3 venv too.)
+def test_module_binds_no_sounddevice_and_qtcore_only():
+    # The service's own globals never bind sounddevice (the import lives
+    # inside the default factory). Qt is now a DECLARED dependency — the
+    # ``stopped`` signal + poll timer — but QtCore only: QtWidgets must
+    # never creep into a service, and the Qt-less engine venv skips this
+    # file via importorskip instead of the old module-level Qt-less pin.
     bound_modules = [
         v for v in vars(cp).values() if isinstance(v, types.ModuleType)
     ]
     for mod in bound_modules:
-        assert not mod.__name__.startswith("PySide6")
         assert mod.__name__ != "sounddevice"
+        assert not mod.__name__.startswith("PySide6.QtWidgets")
+    for name in ("QObject", "QTimer", "Signal"):
+        assert getattr(cp, name).__module__.startswith("PySide6.QtCore")

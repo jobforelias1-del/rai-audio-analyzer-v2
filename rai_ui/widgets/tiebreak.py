@@ -17,7 +17,16 @@ Doctrine enforced here (so the shell cannot get it wrong):
   preview; starting preview on another card moves the single preview slot.
 * **✕ closes, preview stops, selection SURVIVES** (04:857): dismiss nulls
   ``previewIdx`` only — reopening shows the same chosen card. Confirm
-  (04:861) also keeps ``chosenIdx``; only new candidates reset it.
+  (04:861) also keeps ``chosenIdx``; new candidates reset it, and UNDO
+  clears it (04:862 ``chosenIdx:null`` — the wiring calls
+  :meth:`TiebreakOverlay.clear_selection` from the undo flow, so a retracted
+  choice never comes back armed).
+* **Playback truth flows back in** via :meth:`TiebreakOverlay.preview_ended`:
+  when the click-preview SERVICE reports playback stopped (natural EOF, a
+  dead device, an external stop — its ``stopped`` signal), the wiring resets
+  ``previewIdx`` here WITHOUT re-emitting ``preview_stop_requested`` — the
+  card returns to "▶ preview click grid", the pulse stops, and the next
+  click starts a fresh preview instead of dead-toggling a stopped engine.
 * **Confirm is enabled only with a selection**: computed label
   ``Set {bpm} — save as ground truth`` vs the static "Pick a candidate"
   ghost (04:340-344). The click is guarded like the demo's ``if(chosen)``.
@@ -787,6 +796,38 @@ class TiebreakOverlay(QWidget):
         self._set_preview(None)
         self.hide()
         self.closed.emit()
+
+    def clear_selection(self) -> None:
+        """Undo semantics (04:862, recon §2.4): ``chosenIdx:null``.
+
+        Confirm KEEPS the selection (04:861) and dismiss keeps it (04:857);
+        undo is the ONE transition that clears it — a retracted choice must
+        not reopen with the selected chrome and an armed confirm footer (one
+        stray Space away from re-saving what the user just took back). The
+        wiring (MainWindow's undo flow) calls this; the widget never watches
+        the session itself.
+        """
+        if self._chosen_idx is None:
+            return
+        self._chosen_idx = None
+        self._refresh_cards()
+        self._style_confirm()
+
+    def preview_ended(self) -> None:
+        """Playback stopped in the SERVICE — reset the ▶/⏸ state truthfully.
+
+        Called by the wiring when :class:`ClickPreview` emits ``stopped``
+        (natural end-of-buffer, a device that died mid-play, or an external
+        stop). Unlike ``_set_preview(None)`` this does NOT emit
+        ``preview_stop_requested`` — the engine is already stopped, and
+        echoing a stop back would be a lie about who ended playback.
+        Idempotent: a stop this overlay itself requested finds the slot
+        already cleared.
+        """
+        if self._preview_idx is None:
+            return
+        self._preview_idx = None
+        self._refresh_cards()
 
     @property
     def chosen_index(self) -> Optional[int]:

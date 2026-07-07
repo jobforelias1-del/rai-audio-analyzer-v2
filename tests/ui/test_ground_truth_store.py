@@ -191,6 +191,92 @@ def test_corrupt_lines_are_skipped_never_fatal(store_dir):
     assert truths["m2"].bpm == 120.0
 
 
+def test_torn_multibyte_line_degrades_never_raises(store_dir):
+    """The adversarial-review live repro: a crash-torn append shearing a
+    multibyte character (accented basenames journal ``ensure_ascii=False``)
+    leaves an invalid UTF-8 byte. Replay must skip that line — a
+    ``UnicodeDecodeError`` propagating out of ``effective_truths()`` would
+    brick ``session.finish`` (and the profile popover, and relearn)."""
+    gts.append_confirm(md5="m1", bpm=100.0, name="a.wav")
+    with open(gts.journal_path(), "ab") as fh:
+        # Lone 0xE9 = the tail of a torn 'é' (U+00E9 is 0xC3 0xA9 in UTF-8;
+        # a latin-1-era single byte or a sheared pair both decode-fail).
+        fh.write(b'{"v": 1, "kind": "confirm", "id": "x", "name": "caf\xe9\n')
+    gts.append_confirm(md5="m2", bpm=120.0, name="b.wav")
+
+    truths = gts.effective_truths()  # must not raise
+    assert set(truths) == {"m1", "m2"}
+    assert gts.lookup("m1").bpm == 100.0
+    assert gts.lookup("m2").bpm == 120.0
+    assert gts.confirmed_count() == 2
+
+
+def test_torn_multibyte_mid_journal_skips_only_that_line(store_dir):
+    """An undecodable line between two good ones costs exactly one line."""
+    gts.append_confirm(md5="m1", bpm=100.0, name="a.wav")
+    with open(gts.journal_path(), "ab") as fh:
+        fh.write(b"\xc3\n")  # sheared lead byte of a 2-byte sequence
+        fh.write(
+            json.dumps(
+                {"v": 1, "kind": "retract", "id": "y", "retracts_md5": "m1",
+                 "at": "2026-07-07T00:00:00Z"}
+            ).encode("utf-8")
+            + b"\n"
+        )
+    assert gts.lookup("m1") is None  # the retraction after the torn line lands
+
+
+def test_unreadable_journal_degrades_to_empty(store_dir):
+    """The outer guard is Exception-wide: even a journal path that is a
+    DIRECTORY (or any other open-time surprise) degrades to no-truth."""
+    os.makedirs(gts.journal_path(), exist_ok=True)  # journal path IS a dir
+    assert gts.effective_truths() == {}
+    assert gts.lookup("m1") is None
+    assert gts.confirmed_count() == 0
+
+
+# ---------------------------------------------------------------------------
+# Torn-trailing-line healing on append
+# ---------------------------------------------------------------------------
+
+
+def test_append_heals_torn_trailing_line_so_retraction_survives(store_dir):
+    """The adversarial-review live repro: without healing, the retraction
+    glues onto the torn fragment, replay skips the merged line, and the
+    undone confirmation RESURRECTS on next boot (cross-session undo defeated).
+    """
+    md5 = "a" * 32
+    gts.append_confirm(md5=md5, bpm=150.0, name="beat.wav")
+    with open(gts.journal_path(), "ab") as fh:
+        fh.write(b'{"v": 1, "kind": "confirm", "id": "12')  # torn, NO newline
+    gts.append_retract(md5)
+
+    assert gts.lookup(md5) is None  # the retraction is effective on replay
+    with open(gts.journal_path(), "rb") as fh:
+        lines = fh.read().split(b"\n")
+    # confirm / healed fragment / retract / trailing empty split
+    assert len(lines) == 4 and lines[3] == b""
+    assert json.loads(lines[2])["kind"] == "retract"  # retract landed whole
+
+
+def test_append_heals_torn_trailing_line_so_new_confirm_survives(store_dir):
+    """Same healing, confirm direction: a post-crash confirmation must not be
+    destroyed by the fragment the crash left behind."""
+    _write_journal_raw('{"v": 1, "kind": "conf')  # torn, NO newline
+    gts.append_confirm(md5="m1", bpm=140.0, name="a.wav")
+    assert gts.lookup("m1").bpm == 140.0
+
+
+def test_append_does_not_add_spurious_newline_on_clean_journal(store_dir):
+    """Healing only fires on a torn tail — clean appends stay one-line-each."""
+    gts.append_confirm(md5="m1", bpm=100.0, name="a.wav")
+    gts.append_confirm(md5="m2", bpm=120.0, name="b.wav")
+    with open(gts.journal_path(), "rb") as fh:
+        raw = fh.read()
+    assert b"\n\n" not in raw
+    assert len([ln for ln in raw.split(b"\n") if ln]) == 2
+
+
 def test_blank_lines_tolerated(store_dir):
     gts.append_confirm(md5="m1", bpm=100.0, name="a.wav")
     with open(gts.journal_path(), "a", encoding="utf-8") as fh:
