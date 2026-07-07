@@ -51,6 +51,12 @@ from rai_ui.state.compare_view import BStatus
 TOAST_B_BLOCKED_BY_ANALYSIS = "Analysis running — load the reference once it finishes"
 TOAST_B_BLOCKED_BY_RELEARN = "Relearning — reference load ignored until it finishes"
 
+# Stragglers that outlive close()'s bounded wait are detached from the
+# window's destruction chain and parked here until process exit — destroying
+# a running QThread is a Qt qFatal hard abort (the relearn.py recipe;
+# M4 review finding, 3/3 verified).
+_ORPHANED_THREADS: list[tuple[QThread, AnalysisWorker]] = []
+
 
 class CompareSlot(QObject):
     """B-lane analysis service: own workers, own generation, B payload only.
@@ -150,10 +156,21 @@ class CompareSlot(QObject):
         self.changed.emit()
 
     def close(self) -> None:
-        """Bounded worker-thread teardown (the MainWindow closeEvent recipe)."""
-        for thread, _worker in self._threads:
+        """Bounded worker-thread teardown (the MainWindow closeEvent recipe).
+
+        A straggler that outlives the wait (a long reference WAV mid-decode:
+        ``quit()`` cannot interrupt a compute-bound run) is DETACHED from the
+        window's destruction chain and leaked deliberately — destroying a
+        running QThread is a Qt qFatal hard abort. Mirrors relearn.py.
+        """
+        for thread, worker in self._threads:
             thread.quit()
-            thread.wait(2000)
+            if not thread.wait(2000):
+                thread.setParent(None)  # out of the destruction chain
+                _ORPHANED_THREADS.append((thread, worker))
+        self._threads = [
+            pair for pair in self._threads if pair not in _ORPHANED_THREADS
+        ]
 
     # -- worker completion (main thread via queued signal delivery) -----------------
 

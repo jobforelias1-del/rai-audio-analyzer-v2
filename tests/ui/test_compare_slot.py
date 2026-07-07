@@ -230,3 +230,27 @@ def test_failure_with_no_previous_b_goes_empty(qtbot, slot, tmp_path):
     # Landmine 22 again: the gate settled before the failed relay.
     assert statuses_at_failed == [BStatus.EMPTY]
     assert slot.result is None
+
+
+def test_close_detaches_stragglers_instead_of_qfatal(qtbot, slot, tmp_path):
+    """Quit during an in-flight B must never destroy a running QThread
+    (Qt qFatal hard abort) — stragglers detach and park, the relearn recipe.
+    Review finding M4 (3/3 verified)."""
+    from rai_ui.services import compare_slot as cs
+
+    assert slot.start(_wav(tmp_path)) is None  # accepted (no refusal copy)
+    assert slot._threads, "worker lane should exist"
+    thread, worker = slot._threads[0]
+    thread.wait = lambda *_a, **_k: False  # simulate a compute-bound straggler
+
+    slot.close()
+
+    assert thread.parent() is None  # out of the destruction chain
+    assert (thread, worker) in cs._ORPHANED_THREADS
+    assert (thread, worker) not in slot._threads
+
+    # Hygiene: let the real thread finish so it doesn't leak into other tests.
+    del thread.wait
+    thread.quit()
+    assert thread.wait(30_000)
+    cs._ORPHANED_THREADS.remove((thread, worker))
