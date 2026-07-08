@@ -1,4 +1,4 @@
-# Environment & build policy (v3 baseline, 2026-07-06)
+# Environment & build policy (v3 baseline 2026-07-06 · engine venv rebuilt uv-managed 2026-07-07)
 
 ## The one rule that matters
 
@@ -23,29 +23,40 @@ venv, from a **clean git tree**, and smoke-test the built .app itself.
 
 | file | role |
 | --- | --- |
-| `requirements.lock.txt` | **The reproducible truth.** `pip freeze` of the verified working env (gate 3/3 green, 162 unit tests, 2026-07-06). Rebuild with `pip install -r requirements.lock.txt`. |
-| `requirements.txt` | Human-maintained floors for the reference environment (includes GUI + packaging extras). |
-| `pyproject.toml` | Loose library-style floors for installing `rai_analyzer` as a package (engine core only; GUI is the `[gui]` extra). |
+| `requirements.lock.txt` | **The reproducible truth.** `uv pip freeze` of the verified working env (gate 3/3 green + byte-identical, full suite green, 2026-07-07). Regenerate with `uv pip freeze --python .venv/bin/python \| grep -v '^-e ' > requirements.lock.txt` (the project's own editable line is excluded — it is machine-specific and installed separately with `-e .`). Rebuild with `uv pip install --python <venv>/bin/python -r requirements.lock.txt`. |
+| `requirements.txt` | Human-maintained floors for the engine reference environment (+ PyInstaller for packaging). The tkinter-GUI extras (matplotlib, tkinterdnd2) were retired with `rai_analyzer/gui.py` in the v3 cutover. |
+| `pyproject.toml` | Loose library-style floors for installing `rai_analyzer` as a package (engine core only). |
 
 When these disagree, the lockfile wins for reproducing the baseline; the
 others are compatibility metadata.
 
-## The verified baseline environment (2026-07-06)
+## The verified engine environment (rebuilt 2026-07-07, M5 cutover)
 
-- Interpreter: CPython **3.14.6** (`.venv`; originally created from Homebrew
-  3.14.3 — see caveat below). Fine for **headless engine work and the
-  validation gate**; the Tcl/Tk 9 poison only affects GUI/frozen builds.
-- Key packages: numpy 2.4.6, scipy 1.17.1, librosa 0.11.0, soundfile 0.13.1,
-  pyloudnorm 0.2.0, numba 0.65.1, matplotlib 3.10.9, tkinterdnd2 0.4.3,
-  pyinstaller 6.20.0, pytest (added 2026-07-06 for the suite).
-- Verified in this env: full unit suite green (162), real acceptance gate
-  **3/3 PASS** on the md5-pinned fixtures, headless CLI ~1.7 s on a 7.5 s WAV.
+- Interpreter: **uv-managed CPython 3.14.5** (`.venv`; created with
+  `uv venv --python 3.14 --python-preference only-managed .venv` — the same
+  discipline as `.venv-v3`, M0 landmine 3: plain `--python 3.14` happily
+  resolves to Homebrew). Verify with `sys.base_prefix` — it must point into
+  `~/.local/share/uv/python/`, never Homebrew.
+- Installed with `uv pip install --python .venv/bin/python -r
+  requirements.txt -e . pytest "numba>=0.65"` (the numba floor is now in
+  requirements.txt itself — without it the resolver can backtrack onto an
+  ancient uncapped numba when the newest numpy excludes the modern ones).
+- Key packages: numpy 2.4.6, scipy 1.18.0, librosa 0.11.0, soundfile 0.14.0,
+  pyloudnorm 0.2.0, numba 0.66.0, pyinstaller 6.21.0, pytest 9.1.1.
+- Verified in this env: full engine suite green, real acceptance gate
+  **3/3 PASS byte-identical** to `docs/baselines/gate-reference-v3baseline.txt`
+  on the md5-pinned fixtures, `rai-analyze` console script live.
+- One suite delta vs the pre-rebuild env: `tests/ui/test_fonts_cmap.py` now
+  SKIPs here (fontTools was only ever present as a matplotlib transitive,
+  retired with the GUI extras); the D10 cmap gate still runs in `.venv-v3`,
+  which pins fonttools.
 
-**Caveat — venv drift under Homebrew:** `.venv/pyvenv.cfg` records 3.14.3 but
-the interpreter now reports 3.14.6, because Homebrew upgraded Python underneath
-the venv. This is exactly the class of silent environment change the lockfile
-exists to survive; a from-scratch rebuild should prefer a uv/python.org
-interpreter that nothing upgrades behind your back.
+**History — the Homebrew drift caveat (resolved 2026-07-07):** the previous
+`.venv` was created from Homebrew 3.14.3 and silently became 3.14.6 when
+Homebrew upgraded Python underneath it — exactly the class of change the
+lockfile exists to survive. The M5 cutover replaced it with the uv-managed
+env above (old env parked at `.venv-old-homebrew/` for rollback until
+close-out; nothing upgrades a uv-managed interpreter behind your back).
 
 ## Known-good commands
 

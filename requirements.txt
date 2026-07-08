@@ -11,6 +11,12 @@ librosa>=0.11.0
 soundfile>=0.13.1
 pyloudnorm>=0.2.0
 
+# numba is transitive (librosa → numba) but needs an explicit floor: modern
+# numba caps its numpy compatibility, so a resolver chasing the newest numpy
+# can backtrack onto an ancient uncapped numba whose build then fails on
+# Python 3.14 (observed with uv 0.11 during the 2026-07-07 v3 cutover
+# rebuild). The floor keeps the resolution in the verified family.
+numba>=0.65
 
 # macOS .app packaging (install on the build Mac only; not needed at runtime)
 pyinstaller>=6.0

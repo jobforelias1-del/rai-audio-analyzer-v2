@@ -7,6 +7,10 @@ build/*.app/
 dist/
 .venv/
 venv/
+# M5 cutover: the pre-rebuild Homebrew-drifted engine venv, parked for
+# rollback until close-out (RC deletes), + the transient rebuild name.
+.venv-old-homebrew/
+.venv-rebuilt/
 
 # PyInstaller
 *.spec.bak
