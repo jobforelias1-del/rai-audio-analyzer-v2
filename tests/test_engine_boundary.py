@@ -40,7 +40,6 @@ _FORBIDDEN_IN_METRICS = {
     "rai_analyzer.candidates",
     "rai_analyzer.analyzer",
     "rai_analyzer.cli",
-    "rai_analyzer.gui",
     "rai_analyzer.config",
 }
 

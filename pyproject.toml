@@ -16,7 +16,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["tkinterdnd2>=0.3", "matplotlib>=3.7"]
 dev = ["pytest>=7.0"]
 
 [project.scripts]

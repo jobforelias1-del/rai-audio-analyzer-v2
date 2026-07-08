@@ -1,4 +1,4 @@
-# RAI Audio Analyzer v2 — Python dependencies
+# RAI Audio Analyzer — engine Python dependencies
 #
 # Versions are floors derived from what is installed in the reference
 # environment (pip show output on 2026-05-29).  Use >= so that callers on
@@ -11,9 +11,6 @@ librosa>=0.11.0
 soundfile>=0.13.1
 pyloudnorm>=0.2.0
 
-# GUI (drag-drop interface)
-matplotlib>=3.7
-tkinterdnd2>=0.3
 
 # macOS .app packaging (install on the build Mac only; not needed at runtime)
 pyinstaller>=6.0

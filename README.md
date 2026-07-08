@@ -1,8 +1,15 @@
-# RAI Audio Analyzer v2
+# RAI Audio Analyzer v3
 
 Octave-resistant tempo analysis and loudness metering for drill/trap production.
 Built to fix the one failure mode that matters: confidently reporting the wrong
 BPM because the algorithm silently picked an octave.
+
+v3 pairs the proven v2 tempo engine (`rai_analyzer/` — byte-identical
+acceptance-gate output) with a native PySide6 desktop app (`rai_ui/`): tempo
+tiebreak with audible click-grid preview, human ground-truth confirmation and
+profile relearning, signal metrics, and A/B compare. The v2 tkinter GUI was
+retired in the v3 cutover (its Tcl/Tk 9 postmortem lives in
+`docs/ENVIRONMENT.md`).
 
 ---
 
@@ -123,19 +130,16 @@ Python 3.10 or later is required.
 
 ## 4. Running the Analyzer
 
-### GUI — drag-and-drop
+### GUI — the v3 desktop app
 
 ```bash
-python -m rai_analyzer.gui
+python -m rai_ui        # dev run (PySide6, .venv-v3)
 ```
 
-A dark-mode window opens.  Drop a WAV file onto the drop zone (or click
-**Browse…**).  Two tabs appear after analysis completes:
-
-- **Analysis** — the full text report: primary BPM, felt BPM, ambiguity
-  verdict, ranked candidate table, and loudness measurements.
-- **Tempogram** — a salience-curve plot (requires matplotlib) with vertical
-  lines marking the primary BPM, felt BPM, and other candidates.
+Or launch the frozen `RAI Audio Analyzer.app` (see section 7). Drop a WAV
+anywhere on the window (or click **Browse…**): Overview, Tempo (candidate
+table, tiebreak with click-grid preview, ground-truth confirm), Signal,
+Compare, and the verbatim Report.
 
 ### CLI
 
@@ -271,29 +275,32 @@ valid macOS bundle.
 
 ### Prerequisites (on the Mac)
 
-- macOS 10.15 Catalina or later
-- Python 3.10+ on `PATH` (e.g. installed via `brew install python@3.12`)
-- Internet access for the initial pip install
+- macOS 13 Ventura or later (Qt 6.8+ floor)
+- The uv-managed v3 UI venv (`.venv-v3` — see `docs/ENVIRONMENT.md`; **never
+  Homebrew Python**, per the build policy)
+- A **clean git tree** — the build script hard-aborts otherwise
 
 ### Build
 
 From the repository root:
 
 ```bash
-bash build/build_macos.sh
+bash build/build_macos_v3.sh
 ```
 
-The script:
-1. Creates a fresh virtualenv (`.venv-build/`)
-2. Installs all dependencies from `requirements.txt`
-3. Runs `pyinstaller build/RAIAudioAnalyzer.spec --noconfirm`
-4. Strips quarantine bits: `xattr -cr "dist/RAI Audio Analyzer.app"`
-5. Applies an **ad-hoc code signature**: `codesign --force --deep --sign - "dist/RAI Audio Analyzer.app"`
+The script (the ONLY supported freeze path — it stamps build provenance and
+smoke-tests the result):
+1. Guards the interpreter (uv-managed, non-Homebrew) and the clean tree
+2. Stamps the commit hash into `rai_ui/_buildinfo.py` and the Info.plist
+3. Runs `pyinstaller build/RAIv3.spec`
+4. Asserts the bundle carries no Qt/sklearn bloat, ad-hoc signs it
+5. Runs BOTH frozen smoke probes (direct `--smoke` exec and the `open -n`
+   LaunchServices launch + crash-report scan)
 
 The finished app lands at:
 
 ```
-dist/RAI Audio Analyzer.app
+dist-v3/RAI Audio Analyzer.app
 ```
 
 Drag it into `/Applications` or distribute as a ZIP.
@@ -311,8 +318,7 @@ build script applies automatically):
 
 To ship to end users without the right-click workaround, you need an Apple
 Developer Program membership ($99/year) and a **Developer ID Application**
-certificate.  The full workflow is documented as "Option B" in
-`build/build_macos.sh`.  The entitlements file at `build/entitlements.plist`
+certificate.  The entitlements file at `build/entitlements.plist`
 grants the hardened-runtime permissions required by numba's JIT compiler
 (`com.apple.security.cs.allow-jit` and
 `com.apple.security.cs.allow-unsigned-executable-memory`); pass it to
@@ -323,11 +329,11 @@ grants the hardened-runtime permissions required by numba's JIT compiler
 ## 8. Architecture / Module Map
 
 ```
-rai_analyzer/
+rai_analyzer/          THE ENGINE (UI-free; never imports rai_ui or Qt)
   __init__.py          Public API: analyze_file, TempoConfig, contracts re-exported
   analyzer.py          Top-level orchestrator: load → build_features → resolve_tempo → loudness
   cli.py               CLI entry point (python -m rai_analyzer.cli)
-  gui.py               tkinter GUI: drag-drop, Browse, Analysis tab, Tempogram tab
+  profiles.py          Packaged --profile registry ("drill" = the default config)
   config.py            ALL tunable weights and parameters (TempoConfig + sub-dataclasses)
   contracts.py         Data shapes: AnalysisResult, TempoResult, Candidate, LoudnessResult, etc.
   io_audio.py          Audio loading + resampling (returns AudioSignal)
@@ -337,6 +343,8 @@ rai_analyzer/
   candidates.py        Candidate BPM generation (multipliers + independent tempogram peaks)
   loudness.py          ITU-R BS.1770 / EBU R128 loudness (pyloudnorm wrapper)
   synthetic.py         Synthetic drill beat generator (used by the validation self-test)
+  beatgrid.py          Beat-phase estimation for the click-grid preview (M2)
+  metrics/             Engine-additive signal metrics: spectrum, dynamics, bands, stereo (M2)
   fingerprints/        Bundled genre fingerprint JSON files (e.g. drill.json)
   evidence/
     __init__.py        Evidence sub-package
@@ -344,6 +352,12 @@ rai_analyzer/
     hihat_density.py   Hi-hat subdivision-density evidence term
     prior.py           Soft log-normal tempo prior evidence term (+ fit_prior utility)
     tempogram_strength.py  Product-tempogram salience evidence term
+
+rai_ui/                THE v3 DESKTOP APP (PySide6; imports the engine, never
+                       the reverse — AST-enforced by tests/test_engine_boundary.py)
+  __main__.py          python -m rai_ui: GUI / smoke probe / headless CLI dispatch
+  main_window.py       Shell: chrome, sections, drag-drop, analysis wiring
+  sections/ widgets/ plots/ state/ services/ theme/   see docs/PHASE3_PLAN.md §1
 
 validation/
   __init__.py          Package init (exposes run_gate)
@@ -355,10 +369,12 @@ validation/
 
 ---
 
-## 9. Deferred (Not Built)
+## 9. Contract Notes
 
-**Dynamic range / crest factor** — loudness reporting currently covers
-integrated LUFS, true peak (dBTP), and sample peak (dBFS) as defined in
-`rai_analyzer/contracts.py` (`LoudnessResult`).  Dynamic range (e.g. DR14 /
-PLR) and crest factor are explicitly deferred per the v2 build spec and are not
-implemented.
+**Dynamic range / crest factor** — deferred in v2, closed by v3's
+engine-additive metrics layer (`rai_analyzer/metrics/`): crest, whole-file
+RMS, band energy, and stereo width are computed for the app's Overview and
+Signal sections.  The CLI/report contract is deliberately unchanged:
+`AnalysisResult` (`rai_analyzer/contracts.py`) still carries tempo + loudness
+only, so `python -m rai_analyzer.cli` output and the acceptance-gate bytes
+are identical to the shipped v2 engine.
