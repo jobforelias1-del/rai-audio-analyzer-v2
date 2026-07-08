@@ -1,4 +1,6 @@
-# M5 Handoff — Hardening + Cutover: the v3.0.0 candidate (built 2026-07-07 · awaiting operator acceptance)
+# M5 Handoff — Hardening + Cutover: v3.0.0 (built 2026-07-07 · **OPERATOR-ACCEPTED 2026-07-07**)
+
+**Acceptance record:** end-to-end drive passed — Compare clean on real A/B material (KORDHELL vs Yelawolf: Δ table + spectrum overlay + plain-language readings); tempo validated including a **Double-A**: a Suicideboy$ track where the engine caught BOTH the notated 147.59 and the felt 73.80 with a confident verdict, matching SongBPM's dual reading and beating the Google AI Overview's single-tempo answer. Frozen-binary CLI ran standalone from a bare Terminal (clean JSON: ambiguity_reason strings, ranked candidates with fingerprint/hihat/tempogram/prior term breakdowns, full loudness block) — turnkey as promised. **Archived v2-era Desktop apps: KEEP both (operator ruling — do not delete).**
 
 **Branch:** `phase3/m5-cutover` @ `2bd317a` — **LOCAL-ONLY, not merged, not pushed, NOT yet tagged.**
 On Elias's acceptance: merge → push → **tag `v3.0.0`** → rebuild at the tag (self-stamps via `git describe`) → ship. Baseline: `main` @ `b96f1da` (M0–M4 all landed + accepted).
@@ -34,7 +36,12 @@ Run over 16 tracks (6 pinned fixtures + the July-7 real drops), packaged fingerp
 5. **Old Desktop .apps** (`~/Desktop/july 2nd 26/Desktop Apps/RAI Audio Analyzer v2.app` + the backup in the Land fill): keep-archived or delete — YOUR call, nothing auto-deleted.
 6. On acceptance say the word: merge → push → CI → tag `v3.0.0` → final tag-stamped rebuild → RC deletes `.venv-old-homebrew` + stale `egg-info` + the old 510 MB `dist/`.
 
-## Post-v3.0.0 backlog (inherited, none blocking)
+## Post-v3.0.0 backlog (inherited + acceptance findings, none blocking)
+
+**From the acceptance pass (Elias, 2026-07-07):**
+1. Confirmed banner duplicates the phrase "saved as ground truth" across the confirmation line and the persistent state line — de-duplicate the copy.
+2. DRILL profile popover: placement overlaps the tempo profile info panel; single-action content ("Relearn from N confirmed") feels thin for a popover — either collapse to a direct button or expand with profile-detail options (a design-truth item; RC + the design punch list).
+3. External rename planned: v3 ships under a new outward-facing name to distinguish it from the archived v1/v2 apps; the internal repo/product name RAI stays. (Naming = Elias's; plumbing when he picks one.)
 
 Trigger-2 flag-rate decision (data above) · design punch lists (tokens v0.1.2/0.1.3 reconciliation, chip 10px, reading 12px floors) · `_ORPHANED_THREADS`-style shared promotion if a 5th WorkingOverlay importer appears · relearn skip-report accessor for the popover · Compare readings for future metrics · Study Mode (nav slot reserved).
 
