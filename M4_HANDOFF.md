@@ -23,6 +23,8 @@ Drop routing by active page (NO_FILE drops fall through to A — builder guard, 
 
 ## Notes for acceptance
 
+- **Copy-CLI is argument-parity, not turnkey** (clarified with Elias at acceptance): the copied `rai-analyze … --profile drill` command requires the package installed (`pip install -e .` / the repo venv — today only `.venv/bin/rai-analyze` exists on this machine; it is not on the login PATH). The button's guarantee is same-file/same-profile/byte-identical output, not distribution. M5 owns making it out-of-the-box (shell shim beside the .app, or a headless passthrough on the frozen binary — same engine either way).
+
 - Two API-server-error agent deaths occurred mid-build (transient platform instability); both recovered via transcript resume with zero lost work — worth knowing only because the build narrative in the session log looks bumpier than the result.
 - Builder divergences ratified as non-issues by the review: em-dash cells stay `text.primary` (colors-set-once beats C-15's muted grey here), reading text 12.5→12px (integer Qt floor, queued to the design punch list), no hover on chips' decorative rides, no gridlines in the Compare overlay (04 draws none).
 - Budget: M4 landed at roughly **a quarter of M3's agent volume** (lean recon/build/review shapes).
