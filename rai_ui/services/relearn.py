@@ -72,6 +72,7 @@ RelearnError text verbatim) and cancellation (``ok=False``,
 
 from __future__ import annotations
 
+import glob
 import json
 import logging
 import os
@@ -337,6 +338,46 @@ def profile_state() -> ProfileState:
         confirmed_count=ground_truth_store.confirmed_count(),
         backup_exists=os.path.exists(ground_truth_store.user_profile_backup_path()),
     )
+
+
+def sweep_orphan_tmp_profiles() -> int:
+    """Remove stray ``*.tmp-<pid>`` staging files from the fingerprints dir.
+
+    ``run_relearn`` stages the new profile as ``drill.user.json.tmp-<pid>``
+    and removes it in its ``finally`` — but a HARD kill (SIGKILL, power loss)
+    between the staging write and the cleanup strands the temp on disk.
+    Stranded temps are provably inert (nothing ever reads that name), so this
+    is hygiene, not correctness: swept once at app startup, count logged.
+
+    WHY startup cannot race a live relearn's staged temp: the sweep's ONLY
+    call site is ``MainWindow.__init__`` (M5). Before the window exists there
+    is no RelearnController and no way to start a relearn; ``run_relearn``'s
+    temp exists only inside an already-running worker, which requires a fully
+    constructed window. The sweep is deliberately NOT called from the relearn
+    worker or any later point in the app's life, so a legitimate mid-relearn
+    temp can never be swept — ``tests/test_relearn_service.py`` pins both the
+    single-call-site property and the behaviour.
+
+    Never raises (this is a startup path): per-file casualties are logged and
+    skipped. Paths resolve through the injectable ``_store_dir`` factory
+    (R-M3-2), and a missing fingerprints dir yields an empty glob — the sweep
+    never CREATES anything. Returns the number of files removed.
+    """
+    profile_dir = os.path.dirname(ground_truth_store.user_profile_path())
+    removed = 0
+    for path in glob.glob(os.path.join(profile_dir, "*.tmp-*")):
+        try:
+            os.unlink(path)
+            removed += 1
+        except OSError as exc:
+            log.warning("orphan-tmp sweep: could not remove %s (%s)", path, exc)
+    if removed:
+        log.info(
+            "orphan-tmp sweep: removed %d stale relearn staging file(s) from %s",
+            removed,
+            profile_dir,
+        )
+    return removed
 
 
 # ---------------------------------------------------------------------------

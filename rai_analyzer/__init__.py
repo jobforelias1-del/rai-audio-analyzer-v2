@@ -1,4 +1,4 @@
-"""RAI Audio Analyzer v2 — octave-resistant tempo analysis for drill/trap.
+"""RAI Audio Analyzer — octave-resistant tempo analysis for drill/trap.
 
 The signature feature: *this number is reliable.* The tempo engine never
 silently picks an octave — it surfaces a ranked, explained candidate set and
@@ -18,7 +18,7 @@ from .contracts import (
     TempoResult,
 )
 
-__version__ = "2.0.0"
+__version__ = "3.0.0"
 
 __all__ = [
     "analyze_file",

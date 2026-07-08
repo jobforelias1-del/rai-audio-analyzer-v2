@@ -1,8 +1,58 @@
 # Changelog
 
-All notable changes to RAI Audio Analyzer v2 are recorded here. Dates are in
+All notable changes to RAI Audio Analyzer are recorded here. Dates are in
 ISO-8601. The acceptance gate (`python -m validation`) is the source of truth
 for behavioural changes; unit tests guard the mechanisms.
+
+## [3.0.0] — 2026-07-07
+
+The v3 modernization (Phase 3, milestones M0–M5). The tempo engine's
+user-visible contract is **byte-identical to the shipped v2 engine**: the
+acceptance gate, CLI text/JSON output, and `to_report()` bytes were pinned
+against the `v3-baseline-phase0` reference at every milestone.
+
+### Added
+
+- **PySide6 desktop app** (`rai_ui/`) replacing the tkinter GUI: Overview,
+  Tempo, Signal, Compare, and Report sections; native drag-and-drop; metric
+  rail ⇄ meter bridge; theme generated from design tokens (M0–M2).
+- **Engine-additive signal metrics** (`rai_analyzer/metrics/`): Welch spectrum
+  at native rate, dynamics (whole-file RMS / crest), sub/bass band energy,
+  stereo width + correlation; `beatgrid.py` beat-phase estimation. Additive
+  only — no pre-existing engine file changed behaviour (M2).
+- **Ground-truth flagship** (M3): human tiebreak with per-candidate click-grid
+  audio preview (sounddevice), append-only md5-keyed confirmation journal
+  under `~/Library/Application Support/RAI Audio Analyzer/`, CONFIRMED·HUMAN
+  display overlay, undo/retraction, explicit profile relearn (≥3 confirms)
+  with backup + one-step revert. The validation gate provably never reads any
+  of it (subprocess boundary test).
+- **Compare A/B** (M4): persistent reference lane, Δ table, spectrum overlay.
+- **CLI `--profile`** (M4): packaged-profile registry (`rai_analyzer/
+  profiles.py`); no-flag output byte-identical to `--profile drill`.
+- **Frozen headless CLI passthrough** (M5): the bundled binary dispatches
+  positional arguments to `rai_analyzer.cli` before any Qt import, so the
+  app's Copy-CLI command is turnkey from the .app itself.
+- **Frozen-build discipline**: PyInstaller spec `build/RAIv3.spec` +
+  `build/build_macos_v3.sh` (uv-managed CPython, clean-tree guard, commit
+  stamping, bloat asserts, two frozen smoke probes including `open -n`).
+
+### Removed
+
+- **The tkinter GUI, retired** (plan D13): `rai_analyzer/gui.py`, the v2
+  PyInstaller spec (`build/RAIAudioAnalyzer.spec`) and build script
+  (`build/build_macos.sh`), and the GUI extra deps (matplotlib, tkinterdnd2).
+  The Tcl/Tk 9 postmortem that motivated the rewrite stays in
+  `docs/ENVIRONMENT.md`.
+
+### Changed
+
+- Version strings are 3.0.0 everywhere user-visible (package metadata,
+  `__version__`, CLI description, bundle Info.plist, status-bar engine
+  segment). Gate output carries no version string — re-verified byte-identical
+  after the bump.
+- Engine venv rebuilt on uv-managed CPython (the Homebrew drift caveat in
+  `docs/ENVIRONMENT.md` is resolved); `requirements.lock.txt` regenerated
+  from the rebuilt, gate-verified environment.
 
 ## [Unreleased]
 

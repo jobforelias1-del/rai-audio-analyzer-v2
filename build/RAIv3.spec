@@ -230,10 +230,9 @@ app = BUNDLE(
     info_plist={
         'CFBundleName': 'RAI Audio Analyzer',
         'CFBundleDisplayName': 'RAI Audio Analyzer',
-        # CFBundleVersion must be a period-separated number list; the
-        # marketing string carries the milestone tag.
+        # CFBundleVersion must be a period-separated number list.
         'CFBundleVersion': '3.0.0',
-        'CFBundleShortVersionString': '3.0.0-m0',
+        'CFBundleShortVersionString': '3.0.0',
 
         'LSApplicationCategoryType': 'public.app-category.music',
         'NSHighResolutionCapable': True,

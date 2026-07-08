@@ -93,6 +93,45 @@ def test_window_constructs(window):
     assert window.session.last_result is None
 
 
+def test_startup_sweeps_orphan_relearn_temp(qtbot, tmp_path, monkeypatch):
+    """M5: a hard-kill-stranded ``drill.user.json.tmp-<pid>`` is swept once at
+    window construction; the live profile file itself is untouched. (The
+    store dir here is the per-test temp from the autouse conftest fixture —
+    never the real one.) Startup is the one moment provably before any
+    relearn can run, which is why this is the sweep's only call site."""
+    import os
+
+    import rai_ui.main_window as mw
+    from rai_ui.services import ground_truth_store as gts
+    from rai_ui.services import recent_files
+
+    monkeypatch.setattr(
+        recent_files,
+        "_settings",
+        lambda: QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat),
+    )
+    monkeypatch.setattr(
+        mw,
+        "_ui_settings",
+        lambda: QSettings(str(tmp_path / "ui.ini"), QSettings.Format.IniFormat),
+    )
+
+    fingerprints_dir = os.path.dirname(gts.user_profile_path())
+    os.makedirs(fingerprints_dir, exist_ok=True)
+    orphan = os.path.join(fingerprints_dir, "drill.user.json.tmp-424242")
+    with open(orphan, "w", encoding="utf-8") as fh:
+        fh.write("{}")
+    bystander = gts.user_profile_path()  # non-matching name must survive
+    with open(bystander, "w", encoding="utf-8") as fh:
+        fh.write("{}")
+
+    win = mw.MainWindow()
+    qtbot.addWidget(win)
+
+    assert not os.path.exists(orphan)
+    assert os.path.exists(bystander)
+
+
 def test_nav_switches_stack_pages(window, qtbot):
     for offset, name in enumerate(["Overview", "Tempo", "Signal", "Compare", "Report"]):
         window.nav.button(name).click()

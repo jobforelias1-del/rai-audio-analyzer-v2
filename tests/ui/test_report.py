@@ -86,6 +86,31 @@ def test_copy_sets_clipboard_to_cli_command(section, qtbot, monkeypatch):
     assert section.copy_button.text() == "Copy CLI command"
 
 
+def test_copy_frozen_puts_bundle_binary_on_clipboard(section, qtbot, monkeypatch):
+    """M5 wiring proof: with the REAL formatter under a posed sys.frozen, the
+    Copy button lands the turnkey frozen-binary command on the clipboard."""
+    import sys as real_sys
+
+    monkeypatch.setattr(real_sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        real_sys,
+        "executable",
+        "/Applications/RAI Audio Analyzer.app/Contents/MacOS/RAIAudioAnalyzer",
+    )
+
+    result = make_fake_result("/tmp/beat.wav")
+    section.set_result(result)
+    section.copy_button.click()
+
+    assert QGuiApplication.clipboard().text() == (
+        '"/Applications/RAI Audio Analyzer.app/Contents/MacOS/RAIAudioAnalyzer"'
+        ' "/tmp/beat.wav" --json --profile drill'
+    )
+    # Drain the 1500 ms copy-feedback singleShot before the widget dies, or
+    # it fires into a LATER test's event loop against a deleted C++ button.
+    qtbot.wait(1700)
+
+
 def test_export_writes_report_txt(section, tmp_path, monkeypatch):
     result = make_fake_result("/tmp/beat.wav")
     section.set_result(result)

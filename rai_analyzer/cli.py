@@ -15,7 +15,7 @@ from .profiles import DEFAULT_PROFILE, PROFILES
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="rai-analyze", description="RAI Audio Analyzer v2")
+    parser = argparse.ArgumentParser(prog="rai-analyze", description="RAI Audio Analyzer v3")
     parser.add_argument("path", help="audio file to analyze (WAV recommended)")
     parser.add_argument("--json", action="store_true", help="emit JSON instead of the text report")
     parser.add_argument("--no-loudness", action="store_true", help="skip loudness measurement")

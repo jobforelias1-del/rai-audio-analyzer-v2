@@ -1,4 +1,4 @@
-"""Data contracts for RAI Audio Analyzer v2.
+"""Data contracts for RAI Audio Analyzer (the v2 engine contract, unchanged in v3).
 
 This module is the single source of truth for the shapes that flow through the
 analyzer. Every other module — the DSP layer, the evidence-term functions, the

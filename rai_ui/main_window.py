@@ -108,6 +108,7 @@ from rai_ui.services.relearn import (
     RelearnError,
     profile_state,
     revert_profile,
+    sweep_orphan_tmp_profiles,
 )
 from rai_ui.services.worker import AnalysisWorker
 from rai_ui.state.compare_view import build_compare_view
@@ -221,6 +222,11 @@ class MainWindow(QMainWindow):
         self.click_preview = ClickPreview()
         # Relearn runs on its own QThread via the controller (R-M3-11).
         self.relearn = RelearnController(self)
+        # M5 hygiene: sweep any relearn staging temp (*.tmp-<pid>) stranded by
+        # a hard kill. Startup is the one provably-safe moment — no relearn
+        # can be running before the window exists — and this is the sweep's
+        # ONLY call site (see the service docstring; pinned by tests).
+        sweep_orphan_tmp_profiles()
         # M4: the persistent Compare B lane (R-M4-2) — its own workers and
         # generation counter; refuses while A works or a relearn runs
         # (R-M4-3). The gates are same-thread callables; the relearn probe is

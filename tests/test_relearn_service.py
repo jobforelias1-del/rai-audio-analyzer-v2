@@ -537,6 +537,107 @@ def test_profile_state_invalid_user_file_reports_packaged(tmp_path):
     assert state.relearned_at is None
 
 
+# ---------------------------------------------------------------------------
+# sweep_orphan_tmp_profiles (M5) — hard-kill hygiene, startup-only
+# ---------------------------------------------------------------------------
+
+
+def _fingerprints_dir() -> str:
+    return os.path.dirname(gts.user_profile_path())
+
+
+def test_sweep_removes_planted_orphans_and_reports_count(isolated_store):
+    fdir = _fingerprints_dir()
+    os.makedirs(fdir, exist_ok=True)
+    orphans = [
+        os.path.join(fdir, "drill.user.json.tmp-99999"),
+        os.path.join(fdir, "drill.user.json.tmp-4242"),
+    ]
+    for path in orphans:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{}")
+
+    assert relearn.sweep_orphan_tmp_profiles() == 2
+    for path in orphans:
+        assert not os.path.exists(path)
+    # Idempotent: a second sweep finds nothing.
+    assert relearn.sweep_orphan_tmp_profiles() == 0
+
+
+def test_sweep_leaves_live_profile_and_backup_alone(tmp_path):
+    confirm_three(tmp_path)
+    relearn.run_relearn()
+    confirm_wav(tmp_path, "click120.wav", 120.0)
+    relearn.run_relearn()  # second run writes the backup too
+    profile, backup = gts.user_profile_path(), gts.user_profile_backup_path()
+    assert os.path.exists(profile) and os.path.exists(backup)
+
+    orphan = os.path.join(_fingerprints_dir(), "drill.user.json.tmp-31337")
+    with open(orphan, "w", encoding="utf-8") as fh:
+        fh.write("{}")
+
+    assert relearn.sweep_orphan_tmp_profiles() == 1
+    assert not os.path.exists(orphan)
+    assert os.path.exists(profile) and os.path.exists(backup)
+    assert relearn.profile_state().kind == "user"  # still valid, still read
+
+
+def test_sweep_on_absent_store_is_a_quiet_noop_that_creates_nothing(isolated_store):
+    # A fresh machine has no store at all; the sweep must neither raise nor
+    # CREATE the directory (R-M3-2: only deliberate acts build the store).
+    assert not os.path.exists(_fingerprints_dir())
+    assert relearn.sweep_orphan_tmp_profiles() == 0
+    assert not os.path.exists(_fingerprints_dir())
+
+
+def test_sweep_single_call_site_is_mainwindow_init():
+    """The mid-relearn-safety argument is STRUCTURAL: a live relearn's staged
+    temp cannot be swept because the sweep's only call site runs before any
+    relearn can exist (MainWindow.__init__ — no window, no controller, no
+    relearn). This test turns that argument into a detector: relearn.py must
+    define but never call the sweep (in particular, never from run_relearn or
+    the worker), and main_window.py must call it exactly once, from inside
+    ``MainWindow.__init__``. AST-only — no Qt import, runs in both venvs.
+    """
+    import ast
+    import inspect
+
+    def _sweep_calls(tree: ast.AST) -> list[ast.Call]:
+        return [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and (
+                getattr(node.func, "id", None) == "sweep_orphan_tmp_profiles"
+                or getattr(node.func, "attr", None) == "sweep_orphan_tmp_profiles"
+            )
+        ]
+
+    # 1. The service module never calls its own sweep.
+    relearn_tree = ast.parse(inspect.getsource(relearn))
+    assert _sweep_calls(relearn_tree) == [], (
+        "relearn.py must never call sweep_orphan_tmp_profiles — a sweep "
+        "inside the relearn machinery could race its own staged temp"
+    )
+
+    # 2. main_window.py calls it exactly once, inside MainWindow.__init__.
+    mw_path = os.path.join(
+        os.path.dirname(os.path.abspath(relearn.__file__)), "..", "main_window.py"
+    )
+    with open(mw_path, "r", encoding="utf-8") as fh:
+        mw_tree = ast.parse(fh.read(), filename=mw_path)
+    all_calls = _sweep_calls(mw_tree)
+    assert len(all_calls) == 1, "expected exactly ONE sweep call site app-wide"
+
+    init_calls = []
+    for node in ast.walk(mw_tree):
+        if isinstance(node, ast.ClassDef) and node.name == "MainWindow":
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and item.name == "__init__":
+                    init_calls = _sweep_calls(item)
+    assert len(init_calls) == 1, "the one sweep call must live in MainWindow.__init__"
+
+
 # The QThread worker/controller tests live in
 # tests/ui/test_relearn_controller.py (module-level PySide6/pytestqt skips —
 # the engine venv has no qtbot fixture, so they cannot share this module).

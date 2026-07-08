@@ -28,7 +28,7 @@ STATUSBAR_HEIGHT = int(token("size.statusbar"))  # 28
 # an M3-era window was tested as if it were the M4 build — a seven-char SHA
 # on screen would have caught it instantly). Reads "build dev" in unfrozen
 # runs; the freeze stamps the real commit into _buildinfo.
-ENGINE_SEGMENT = f"engine v3.0-m0 · build {_BUILD_COMMIT[:7]}"
+ENGINE_SEGMENT = f"engine v3.0.0 · build {_BUILD_COMMIT[:7]}"
 PROFILE_SEGMENT = "profile drill"
 PRIVACY_SEGMENT = "local — nothing leaves this machine"
 WORKING_SEGMENT = "analyzing…"

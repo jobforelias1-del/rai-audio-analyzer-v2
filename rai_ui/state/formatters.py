@@ -17,6 +17,7 @@ byte-stable across widgets. Design doctrine this module enforces:
 from __future__ import annotations
 
 import math
+import sys
 from typing import Optional
 
 # Fractional tolerance on a ratio before a candidate is "unrelated" to the
@@ -265,21 +266,35 @@ def unavailability_reason(kind: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _dq(arg: str) -> str:
+    """Double-quote ``arg`` with embedded double quotes backslash-escaped."""
+    return '"' + arg.replace('"', '\\"') + '"'
+
+
 def cli_command(path: str, profile: str = "drill") -> str:
     """The copy-pasteable CLI equivalent of the current analysis.
 
-    Emits exactly ``rai-analyze "<path>" --json --profile drill`` (R-M4-10).
-    The M4 CLI grew ``--profile`` (rai_analyzer/cli.py, packaged registry in
-    rai_analyzer/profiles.py), so the copied command now names the active
-    profile explicitly — closing the M1-era "no flag until the CLI grows it"
-    note. ``profile`` defaults to the one packaged profile; callers that pass
-    nothing (ReportSection today) inherit it.
+    Dev runs emit exactly ``rai-analyze "<path>" --json --profile drill``
+    (R-M4-10) — the installed console script. FROZEN runs (PyInstaller sets
+    ``sys.frozen``) emit the absolute path of the running bundle binary
+    (``sys.executable``, quoted) as the program instead: the M5 headless
+    passthrough (``rai_ui.__main__``) makes that binary a full engine CLI, so
+    the copied command is turnkey on a machine with nothing pip-installed —
+    closing the M4 handoff's "argument-parity, not turnkey" gap.
 
-    Quoting: the path is double-quoted with embedded double quotes
-    backslash-escaped. ``shlex.quote`` is deliberately not used — its
-    single-quote style breaks on Windows ``cmd``, and double quotes are the
-    one form every target shell accepts. Profile names come from the packaged
-    registry's code-owned keys (bare identifiers), so they ride unquoted.
+    The M4 CLI grew ``--profile`` (rai_analyzer/cli.py, packaged registry in
+    rai_analyzer/profiles.py), so the copied command names the active profile
+    explicitly. ``profile`` defaults to the one packaged profile; callers
+    that pass nothing (ReportSection today) inherit it.
+
+    Quoting: double quotes with embedded double quotes backslash-escaped.
+    ``shlex.quote`` is deliberately not used — its single-quote style breaks
+    on Windows ``cmd``, and double quotes are the one form every target shell
+    accepts. Profile names come from the packaged registry's code-owned keys
+    (bare identifiers), so they ride unquoted.
     """
-    escaped = path.replace('"', '\\"')
-    return f'rai-analyze "{escaped}" --json --profile {profile}'
+    if getattr(sys, "frozen", False):
+        program = _dq(sys.executable)
+    else:
+        program = "rai-analyze"
+    return f'{program} {_dq(path)} --json --profile {profile}'

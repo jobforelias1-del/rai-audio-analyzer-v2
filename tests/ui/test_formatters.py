@@ -293,3 +293,39 @@ def test_cli_command_default_profile_is_a_registry_key():
     default_cmd = fm.cli_command("/a.wav")
     assert default_cmd.endswith(f"--profile {DEFAULT_PROFILE}")
     assert DEFAULT_PROFILE in PROFILES
+
+
+# -- M5 turnkey mode: frozen runs emit the bundle binary itself --------------
+
+_FROZEN_EXE = "/Applications/RAI Audio Analyzer.app/Contents/MacOS/RAIAudioAnalyzer"
+
+
+@pytest.fixture
+def frozen(monkeypatch):
+    """Pose as a PyInstaller frozen process (sys.frozen + bundle exe path)."""
+    monkeypatch.setattr(fm.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(fm.sys, "executable", _FROZEN_EXE)
+
+
+def test_cli_command_frozen_emits_quoted_bundle_binary(frozen):
+    # The M5 headless passthrough makes the frozen binary a full engine CLI,
+    # so the copied command names it absolutely (turnkey — nothing installed).
+    assert fm.cli_command("/Users/e/track.wav") == (
+        f'"{_FROZEN_EXE}" "/Users/e/track.wav" --json --profile drill'
+    )
+
+
+def test_cli_command_frozen_escapes_embedded_quotes_in_both(frozen, monkeypatch):
+    monkeypatch.setattr(fm.sys, "executable", '/odd "dir"/RAIAudioAnalyzer')
+    cmd = fm.cli_command('/mix/take "b".wav')
+    assert cmd == (
+        '"/odd \\"dir\\"/RAIAudioAnalyzer" "/mix/take \\"b\\".wav"'
+        " --json --profile drill"
+    )
+
+
+def test_cli_command_dev_mode_is_the_default(monkeypatch):
+    # Unfrozen interpreters have no sys.frozen at all — the dev spelling
+    # (the installed rai-analyze console script) must remain the default.
+    monkeypatch.delattr(fm.sys, "frozen", raising=False)
+    assert fm.cli_command("/a.wav").startswith('rai-analyze "')
