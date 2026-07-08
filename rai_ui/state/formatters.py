@@ -267,8 +267,13 @@ def unavailability_reason(kind: str) -> str:
 
 
 def _dq(arg: str) -> str:
-    """Double-quote ``arg`` with embedded double quotes backslash-escaped."""
-    return '"' + arg.replace('"', '\\"') + '"'
+    """Double-quote ``arg``, escaping backslashes THEN embedded quotes.
+
+    Backslashes double first or a name ending in ``\\`` swallows the closing
+    quote (M5 review finding) — POSIX double-quote semantics, still the one
+    quoting style every target shell accepts (see cli_command's rationale).
+    """
+    return '"' + arg.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def cli_command(path: str, profile: str = "drill") -> str:

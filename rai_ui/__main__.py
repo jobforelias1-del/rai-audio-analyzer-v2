@@ -57,9 +57,21 @@ def classify_argv(argv: list) -> str:
     can never flip a smoke run onto the cli route.
     """
     args = [a for a in argv if not _is_finder_token(a)]
+    # Reserved-first, PREFIX-matched: argparse accepts unambiguous
+    # abbreviations ("--smoke-a", "--smoke-js=/x.json"), so any token whose
+    # prefix is "--smoke" claims the smoke lane — an abbreviated smoke flag
+    # must never fall through to the GUI/cli routes (M5 review finding).
     for arg in args:
-        if arg in _SMOKE_FLAGS or arg.startswith("--smoke-json="):
+        if arg.startswith("--smoke"):
             return ROUTE_SMOKE
+    # "--" is the standard end-of-options separator: everything after it is
+    # positional by definition (the idiom for dash-leading filenames,
+    # `RAIAudioAnalyzer -- -weird.wav`); argparse downstream honors it too.
+    if "--" in args:
+        tail = args[args.index("--") + 1 :]
+        if tail:
+            return ROUTE_CLI
+        args = args[: args.index("--")]
     if any(not a.startswith("-") for a in args):
         return ROUTE_CLI
     return ROUTE_GUI

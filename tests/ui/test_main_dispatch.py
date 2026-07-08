@@ -205,3 +205,25 @@ def test_gui_route_swallows_finder_token(monkeypatch):
 
     assert main(["-psn_0_98765"]) == 0
     assert calls == ["create"]
+
+
+class TestM5ReviewFindings:
+    """Prefix-matched smoke + the '--' separator (both 3/3-verified)."""
+
+    @pytest.mark.parametrize(
+        "argv",
+        [["--smoke-a"], ["--smoke-js=/tmp/x.json"], ["--smoke-au"], ["--smoke=x"]],
+    )
+    def test_abbreviated_smoke_flags_stay_on_the_smoke_route(self, argv):
+        # argparse accepts unambiguous abbreviations; the dispatcher must
+        # claim them for smoke BEFORE they can leak to the GUI/cli routes.
+        assert classify_argv(argv) == ROUTE_SMOKE
+
+    def test_double_dash_makes_dash_leading_names_positional(self):
+        assert classify_argv(["--", "-weird.wav"]) == ROUTE_CLI
+
+    def test_double_dash_with_empty_tail_is_gui(self):
+        assert classify_argv(["--"]) == ROUTE_GUI
+
+    def test_double_dash_after_smoke_is_still_smoke(self):
+        assert classify_argv(["--smoke", "--", "x.wav"]) == ROUTE_SMOKE

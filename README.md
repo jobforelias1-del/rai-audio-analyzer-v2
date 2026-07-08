@@ -123,8 +123,12 @@ it does not happen in v2.
 pip install -r requirements.txt
 ```
 
-The requirements file pins floor versions from the reference environment.
-Python 3.10 or later is required.
+The requirements file pins floor versions for the **engine** (analysis, CLI,
+validation gate). Python 3.10 or later is required. The Qt desktop app runs
+from its own venv — `requirements-v3.lock.txt` under the uv-managed
+interpreter discipline in `docs/ENVIRONMENT.md` — set that up before
+`python -m rai_ui` in section 4 (M5 review finding: this file alone no
+longer installs the GUI).
 
 ---
 

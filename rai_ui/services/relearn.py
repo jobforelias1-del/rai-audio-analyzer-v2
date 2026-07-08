@@ -349,14 +349,14 @@ def sweep_orphan_tmp_profiles() -> int:
     Stranded temps are provably inert (nothing ever reads that name), so this
     is hygiene, not correctness: swept once at app startup, count logged.
 
-    WHY startup cannot race a live relearn's staged temp: the sweep's ONLY
-    call site is ``MainWindow.__init__`` (M5). Before the window exists there
-    is no RelearnController and no way to start a relearn; ``run_relearn``'s
-    temp exists only inside an already-running worker, which requires a fully
-    constructed window. The sweep is deliberately NOT called from the relearn
-    worker or any later point in the app's life, so a legitimate mid-relearn
-    temp can never be swept — ``tests/test_relearn_service.py`` pins both the
-    single-call-site property and the behaviour.
+    Race safety, both axes (M5 review finding): IN-process, the sweep's ONLY
+    call site is ``MainWindow.__init__`` — before the window exists there is
+    no RelearnController, so this process's own staged temp cannot exist yet
+    (``tests/test_relearn_service.py`` pins the single-call-site property).
+    CROSS-process (``open -n`` second instances are a supported gesture), the
+    temp name embeds its owner's pid: a temp whose pid is a LIVE process is
+    skipped — it may be another instance's in-flight staging. Dead-pid and
+    unparseable temps are the provably-inert strays this sweep exists for.
 
     Never raises (this is a startup path): per-file casualties are logged and
     skipped. Paths resolve through the injectable ``_store_dir`` factory
@@ -366,6 +366,19 @@ def sweep_orphan_tmp_profiles() -> int:
     profile_dir = os.path.dirname(ground_truth_store.user_profile_path())
     removed = 0
     for path in glob.glob(os.path.join(profile_dir, "*.tmp-*")):
+        pid_part = path.rsplit(".tmp-", 1)[-1]
+        if pid_part.isdigit():
+            try:
+                os.kill(int(pid_part), 0)  # signal 0 = liveness probe only
+            except ProcessLookupError:
+                pass  # dead owner — a genuine orphan, sweep it
+            except OSError:
+                # EPERM etc. — a live process we can't signal; still alive.
+                log.info("orphan-tmp sweep: %s owner alive, skipped", path)
+                continue
+            else:
+                log.info("orphan-tmp sweep: %s owner alive, skipped", path)
+                continue
         try:
             os.unlink(path)
             removed += 1

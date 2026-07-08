@@ -59,7 +59,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install numpy scipy librosa soundfile pyloudnorm pytest \
-            pytest-qt PySide6-Essentials shiboken6 pyqtgraph sounddevice
+            pytest-qt PySide6-Essentials shiboken6 pyqtgraph sounddevice fonttools
 
       - name: UI suite (offscreen)
         run: python -m pytest tests/ui -q

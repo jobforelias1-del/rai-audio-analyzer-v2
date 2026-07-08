@@ -546,12 +546,24 @@ def _fingerprints_dir() -> str:
     return os.path.dirname(gts.user_profile_path())
 
 
+def _reaped_pid() -> int:
+    """A pid guaranteed dead: spawn-and-reap a trivial subprocess."""
+    import subprocess
+
+    child = subprocess.Popen(["/usr/bin/true"])
+    child.wait()
+    return child.pid
+
+
 def test_sweep_removes_planted_orphans_and_reports_count(isolated_store):
     fdir = _fingerprints_dir()
     os.makedirs(fdir, exist_ok=True)
+    # Dead-pid + unparseable suffixes = the genuinely inert strays; a fixed
+    # literal pid could be LIVE on a real machine (the sweep now probes
+    # liveness — M5 review finding), so tests must plant provably-dead ones.
     orphans = [
-        os.path.join(fdir, "drill.user.json.tmp-99999"),
-        os.path.join(fdir, "drill.user.json.tmp-4242"),
+        os.path.join(fdir, f"drill.user.json.tmp-{_reaped_pid()}"),
+        os.path.join(fdir, "drill.user.json.tmp-notapid"),
     ]
     for path in orphans:
         with open(path, "w", encoding="utf-8") as fh:
@@ -564,6 +576,20 @@ def test_sweep_removes_planted_orphans_and_reports_count(isolated_store):
     assert relearn.sweep_orphan_tmp_profiles() == 0
 
 
+def test_sweep_skips_a_live_owners_staging_temp(isolated_store):
+    """Cross-instance safety (M5 review finding): a temp whose embedded pid
+    is a LIVE process may be another instance's in-flight relearn staging —
+    the sweep must leave it alone."""
+    fdir = _fingerprints_dir()
+    os.makedirs(fdir, exist_ok=True)
+    live = os.path.join(fdir, f"drill.user.json.tmp-{os.getpid()}")
+    with open(live, "w", encoding="utf-8") as fh:
+        fh.write("{}")
+    assert relearn.sweep_orphan_tmp_profiles() == 0
+    assert os.path.exists(live)
+    os.unlink(live)
+
+
 def test_sweep_leaves_live_profile_and_backup_alone(tmp_path):
     confirm_three(tmp_path)
     relearn.run_relearn()
@@ -572,7 +598,7 @@ def test_sweep_leaves_live_profile_and_backup_alone(tmp_path):
     profile, backup = gts.user_profile_path(), gts.user_profile_backup_path()
     assert os.path.exists(profile) and os.path.exists(backup)
 
-    orphan = os.path.join(_fingerprints_dir(), "drill.user.json.tmp-31337")
+    orphan = os.path.join(_fingerprints_dir(), f"drill.user.json.tmp-{_reaped_pid()}")
     with open(orphan, "w", encoding="utf-8") as fh:
         fh.write("{}")
 
