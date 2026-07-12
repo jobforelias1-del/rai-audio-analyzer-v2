@@ -71,6 +71,53 @@ FOOTER_TEXT = (
 
 POPOVER_WIDTH = 300  # comfortably fits the footer at 11px over two lines
 
+# Placement gaps (M5 backlog item 2 — the overlap fix). DROP is the vertical
+# gap under whatever edge the popover clears (header hairline or bridge
+# strip); GAP is the horizontal breathing room kept from the metric rail.
+POPOVER_DROP = 6
+POPOVER_GAP = 8
+
+
+def anchor_position(
+    *,
+    chip_right_x: int,
+    header_bottom_y: int,
+    popover_width: int,
+    rail_left_x: Optional[int],
+    bridge_bottom_y: Optional[int],
+    min_x: int,
+) -> QPoint:
+    """Global top-left for the popover — chip-aligned but occlusion-free.
+
+    The original anchor pinned the popover's top-right to the chip's
+    bottom-right + 6px with no awareness of what sat underneath: at every
+    window size it covered the rail's left 112px (half the verdict card plus
+    the Primary BPM label) and started 6px above the header's bottom
+    hairline. The rules here keep the designed right-alignment to the genre
+    chip while dodging every fixed surface:
+
+    * y drops below the HEADER's bottom edge (never slicing the hairline);
+      in bridge mode it drops below the 76px strip instead — pass the
+      bridge's global bottom as ``bridge_bottom_y`` only when the bridge is
+      the visible readout;
+    * in rail mode (``rail_left_x`` set), x is clamped so the popover's
+      right edge stays ``POPOVER_GAP`` left of the rail — the popover reads
+      as a popup over the plot, never as a broken half-covered card;
+    * x never goes past ``min_x`` (the window's left content edge), so a
+      narrow window degrades by overlapping plot, not by escaping the
+      window.
+
+    Pure math — the shell feeds global coordinates; the widget stays a dumb
+    ``open_at`` target.
+    """
+    x = chip_right_x - popover_width
+    if rail_left_x is not None:
+        x = min(x, rail_left_x - popover_width - POPOVER_GAP)
+    y = header_bottom_y + POPOVER_DROP
+    if bridge_bottom_y is not None:
+        y = bridge_bottom_y + POPOVER_DROP
+    return QPoint(max(x, min_x), y)
+
 
 def source_line(profile_kind: str, relearned_date: Optional[str]) -> str:
     """The profile source line (R-M3-11 copy).

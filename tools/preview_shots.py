@@ -35,6 +35,10 @@ Shots, in order:
     13-compare-bempty  the same screen after the chip's clear — dashed browse
                      chip, em-dashed B/Δ/Reading columns, the "reference (B)
                      not loaded" pill over a lone A curve
+    14-profile-popover  the header chip's profile popover, placed by the real
+                     entry point (post-M5 placement: below the header
+                     hairline, clear of the rail) and posed armed — composite
+                     grab, since a Qt.Popup never appears in window.grab()
     gate-<fixture>   one Tempo shot per acceptance-gate WAV present on disk
                      (validation/ground_truth.py paths; the WAVs are
                      .gitignored so this is existence-guarded)
@@ -305,6 +309,51 @@ def main(argv: list[str]) -> int:
 
         window.compare_slot.clear()
         shot("13-compare-bempty")
+
+        # Post-ship append (same append-only rule): the profile popover,
+        # placed by the REAL chip entry point (the M5 placement fix — below
+        # the header hairline, clear of the rail), then posed to the rich
+        # armed state (user profile, 3 confirms, backup) so the shot shows
+        # every row. A Qt.Popup is its own top-level window — invisible to
+        # window.grab() — so this shot composites the popover's grab onto
+        # the window frame at its global offset.
+        from PySide6.QtCore import QPoint as _QPoint, QRect as _QRect
+        from PySide6.QtGui import QColor as _QColor, QPainter as _QPainter, QPen as _QPen
+
+        from rai_ui.theme._tokens_gen import (
+            COLOR_BORDER_HAIRLINE as _POP_BORDER,
+            COLOR_SURFACE_PANEL as _POP_SURFACE,
+        )
+
+        _run_analysis(app, window, drill_wav)
+        window.nav.set_current("Tempo")
+        window._open_profile_popover()  # real placement math
+        window.profile_popover.set_state(
+            profile_kind="user",
+            relearned_date="2026-07-07",
+            confirmed_count=3,
+            backup_exists=True,
+        )
+        window.profile_popover.adjustSize()  # settle height for the posed rows
+        app.processEvents()
+        frame = window.grab()
+        pop = window.profile_popover
+        pop_offset = pop.frameGeometry().topLeft() - window.mapToGlobal(_QPoint(0, 0))
+        painter = _QPainter(frame)
+        # Offscreen, grab() of a WA_TranslucentBackground popup loses its QSS
+        # panel background (the real screen paints it) — recreate the panel
+        # chrome from the popover's own tokens, then draw the content grab.
+        painter.setRenderHint(_QPainter.RenderHint.Antialiasing, True)
+        painter.setBrush(_QColor(_POP_SURFACE))
+        painter.setPen(_QPen(_QColor(_POP_BORDER)))
+        painter.drawRoundedRect(_QRect(pop_offset, pop.size()), 7, 7)
+        painter.drawPixmap(pop_offset, pop.grab())
+        painter.end()
+        pop_path = os.path.join(outdir, "14-profile-popover.png")
+        if not frame.save(pop_path):
+            raise RuntimeError(f"could not save {pop_path}")
+        saved.append(pop_path)
+        window.profile_popover.hide()
 
         # Acceptance-gate fixtures, if the producer has them on disk.
         from validation.ground_truth import available_tracks

@@ -121,7 +121,11 @@ from rai_ui.widgets.header import HeaderBar, format_file_meta
 from rai_ui.widgets.meter_bridge import MeterBridge
 from rai_ui.widgets.metric_readout import MetricRail
 from rai_ui.widgets.nav_rail import SECTIONS, NavRail
-from rai_ui.widgets.profile_popover import ProfilePopover
+from rai_ui.widgets.profile_popover import (
+    POPOVER_GAP,
+    ProfilePopover,
+    anchor_position,
+)
 from rai_ui.widgets.status_bar import StatusBar
 from rai_ui.widgets.toast import Toast
 
@@ -827,10 +831,30 @@ class MainWindow(QMainWindow):
             confirmed_count=state.confirmed_count,
             backup_exists=state.backup_exists,
         )
+        # Placement (M5 backlog item 2): chip-aligned but occlusion-free —
+        # below the header hairline, dodging the rail / clearing the bridge.
+        # The math lives in anchor_position (pure, unit-tested); this site
+        # only gathers the global coordinates of whatever is visible.
         chip = self.header.genre_chip
-        corner = chip.mapToGlobal(QPoint(chip.width(), chip.height() + 6))
         self.profile_popover.open_at(
-            QPoint(corner.x() - self.profile_popover.width(), corner.y())
+            anchor_position(
+                chip_right_x=chip.mapToGlobal(QPoint(chip.width(), 0)).x(),
+                header_bottom_y=self.header.mapToGlobal(
+                    QPoint(0, self.header.height())
+                ).y(),
+                popover_width=self.profile_popover.width(),
+                rail_left_x=(
+                    self.rail.mapToGlobal(QPoint(0, 0)).x()
+                    if self.rail.isVisible()
+                    else None
+                ),
+                bridge_bottom_y=(
+                    self.bridge.mapToGlobal(QPoint(0, self.bridge.height())).y()
+                    if self.bridge.isVisible()
+                    else None
+                ),
+                min_x=self.mapToGlobal(QPoint(0, 0)).x() + POPOVER_GAP,
+            )
         )
 
     def _on_relearn_requested(self) -> None:

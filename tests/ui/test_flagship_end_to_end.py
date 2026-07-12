@@ -773,3 +773,44 @@ def test_gate_byte_identical_after_flagship_mutations(tmp_path, monkeypatch):
         "gate output drifted after the flagship arcs — the M3 exit criterion "
         "is violated"
     )
+
+
+# ---------------------------------------------------------------------------
+# Popover placement (M5 backlog item 2): the popup never occludes a readout
+# ---------------------------------------------------------------------------
+
+
+def _global_rect(widget):
+    from PySide6.QtCore import QPoint, QRect
+
+    top_left = widget.mapToGlobal(QPoint(0, 0))
+    return QRect(top_left.x(), top_left.y(), widget.width(), widget.height())
+
+
+def test_popover_placement_clears_header_rail_and_bridge(window, qtbot, tmp_path):
+    """The real chip click places the popover below the header hairline,
+    fully clear of the rail (rail mode) and of the 76px strip (bridge mode).
+    The old anchor failed all three at every window size (M5 finding #2)."""
+    window.show()
+    wav = _write_drill(tmp_path, 140.0)
+    _analyze(window, qtbot, wav)  # land on Tempo so a readout is visible
+
+    # Rail mode.
+    window._set_rail_collapsed(False)
+    assert window.rail.isVisible()
+    qtbot.mouseClick(window.header.genre_chip, Qt.MouseButton.LeftButton)
+    popover = window.profile_popover
+    assert popover.isVisible()
+    pop_rect = popover.frameGeometry()
+    assert not pop_rect.intersects(_global_rect(window.rail))
+    assert pop_rect.top() >= _global_rect(window.header).bottom()
+    popover.hide()
+
+    # Bridge mode.
+    window._set_rail_collapsed(True)
+    assert window.bridge.isVisible()
+    qtbot.mouseClick(window.header.genre_chip, Qt.MouseButton.LeftButton)
+    pop_rect = popover.frameGeometry()
+    assert not pop_rect.intersects(_global_rect(window.bridge))
+    assert pop_rect.top() >= _global_rect(window.header).bottom()
+    popover.hide()

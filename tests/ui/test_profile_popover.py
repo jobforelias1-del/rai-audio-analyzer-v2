@@ -19,12 +19,15 @@ from PySide6.QtCore import Qt
 
 from rai_ui.widgets.profile_popover import (
     FOOTER_TEXT,
+    POPOVER_DROP,
+    POPOVER_GAP,
     POPOVER_TITLE,
     RELEARN_MIN_CONFIRMS,
     REVERT_LINK_TEXT,
     SOURCE_PACKAGED_TEXT,
     SOURCE_USER_TEXT,
     ProfilePopover,
+    anchor_position,
     confirmed_count_line,
     relearn_label,
     source_line,
@@ -252,3 +255,78 @@ def test_popover_imports_no_service():
                 assert not alias.name.startswith("rai_ui.services")
         elif isinstance(node, ast.ImportFrom):
             assert not (node.module or "").startswith("rai_ui.services")
+
+
+# ---------------------------------------------------------------------------
+# Placement math (M5 backlog item 2 — the occlusion fix)
+# ---------------------------------------------------------------------------
+
+
+class TestAnchorPosition:
+    """Pure-math pins for anchor_position — global coords in, QPoint out.
+
+    Scenario numbers mirror the measured defect: at 1100×720 the old anchor
+    put a 300px popover at (678, 45) — 6px above the header's bottom
+    hairline (y=51) and 112px deep into the rail (rail left x=866).
+    """
+
+    def test_rail_mode_dodges_the_rail(self):
+        pos = anchor_position(
+            chip_right_x=978,      # old x would be 978-300 = 678
+            header_bottom_y=51,
+            popover_width=300,
+            rail_left_x=866,       # old right edge (978) sat 112px past this
+            bridge_bottom_y=None,
+            min_x=8,
+        )
+        # Right edge stays POPOVER_GAP left of the rail…
+        assert pos.x() + 300 == 866 - POPOVER_GAP
+        # …and the top clears the header hairline instead of slicing it.
+        assert pos.y() == 51 + POPOVER_DROP
+
+    def test_chip_alignment_wins_when_it_already_clears_the_rail(self):
+        # A chip far from the rail keeps the designed right-alignment.
+        pos = anchor_position(
+            chip_right_x=500,
+            header_bottom_y=51,
+            popover_width=300,
+            rail_left_x=866,
+            bridge_bottom_y=None,
+            min_x=8,
+        )
+        assert pos.x() == 500 - 300
+
+    def test_bridge_mode_clears_the_strip(self):
+        pos = anchor_position(
+            chip_right_x=978,
+            header_bottom_y=51,
+            popover_width=300,
+            rail_left_x=None,      # bridge mode: no rail to dodge
+            bridge_bottom_y=127,   # header 51 + 76px strip
+            min_x=8,
+        )
+        assert pos.x() == 978 - 300  # chip alignment holds without a rail
+        assert pos.y() == 127 + POPOVER_DROP
+
+    def test_hero_mode_is_plain_chip_alignment_below_header(self):
+        pos = anchor_position(
+            chip_right_x=978,
+            header_bottom_y=51,
+            popover_width=300,
+            rail_left_x=None,
+            bridge_bottom_y=None,
+            min_x=8,
+        )
+        assert pos.x() == 978 - 300
+        assert pos.y() == 51 + POPOVER_DROP
+
+    def test_narrow_window_clamps_to_left_content_edge(self):
+        pos = anchor_position(
+            chip_right_x=290,      # window narrower than the popover
+            header_bottom_y=51,
+            popover_width=300,
+            rail_left_x=100,
+            bridge_bottom_y=None,
+            min_x=8,
+        )
+        assert pos.x() == 8  # degrade inside the window, never escape it

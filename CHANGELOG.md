@@ -8,6 +8,18 @@ for behavioural changes; unit tests guard the mechanisms.
 
 ### Fixed
 
+- **Profile popover placement** (M5 acceptance finding #2, placement half):
+  the popover anchored to the genre chip with no awareness of what sat
+  underneath — at every window size it covered the left 112px of the metric
+  rail (half the verdict card plus the Primary BPM readout) and started 6px
+  above the header's bottom hairline; in bridge mode it covered the strip's
+  metric cells. New placement (`anchor_position`, pure + unit-tested): keeps
+  the designed chip right-alignment but drops below the header's bottom
+  edge, clamps left of the rail in rail mode, clears the 76px strip in
+  bridge mode, and never escapes the window's left content edge. Preview
+  harness gains the append-only `14-profile-popover` composite shot (a
+  Qt.Popup is invisible to `window.grab()`).
+
 - **Confirmed card copy de-dupe** (M5 acceptance finding #1): the rail's
   confirmed verdict card said "saved as ground truth" twice — on the computed
   reason line and again on the persistent undo line. The undo line is now the
