@@ -38,6 +38,19 @@ for behavioural changes; unit tests guard the mechanisms.
 
 ### Fixed
 
+- **A-lane close teardown could let GC destroy a running QThread** (the
+  2026-07-12 CI ui-offscreen SIGSEGV, 2 crashes in 3 runs, identical
+  stacks): `MainWindow.closeEvent` did `quit(); wait(2000)` and on timeout
+  dropped the thread/worker wrappers — a compute-bound analysis worker
+  (fingerprint scoring exceeds the 2 s grace on slow CI runners) was then
+  destroyed by a later GC pass while still running (Qt hard abort / heap
+  corruption). Same shipped-app risk closing mid-analysis of a long WAV.
+  Retrofitted the compare_slot/relearn straggler recipe the B lane already
+  had ("the MainWindow closeEvent recipe" that MainWindow itself never got):
+  stragglers detach from the destruction chain and park in
+  `_ORPHANED_THREADS` until process exit. Pinned mirroring the compare-slot
+  straggler test.
+
 - **Profile popover placement** (M5 acceptance finding #2, placement half):
   the popover anchored to the genre chip with no awareness of what sat
   underneath — at every window size it covered the left 112px of the metric

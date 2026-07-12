@@ -814,3 +814,38 @@ def test_popover_placement_clears_header_rail_and_bridge(window, qtbot, tmp_path
     assert not pop_rect.intersects(_global_rect(window.bridge))
     assert pop_rect.top() >= _global_rect(window.header).bottom()
     popover.hide()
+
+
+# ---------------------------------------------------------------------------
+# A-lane close teardown: stragglers detach, never destroyed running (07-12)
+# ---------------------------------------------------------------------------
+
+
+def test_close_detaches_analysis_stragglers_instead_of_gc_abort(
+    window, qtbot, tmp_path
+):
+    """closeEvent must never leave a possibly-running A-lane QThread on the
+    window's destruction chain — GC destroying a running QThread is a hard
+    abort (the CI ui-offscreen SIGSEGV: fingerprint scoring outlives the 2 s
+    grace on slow runners). Same recipe as compare_slot.close(), pinned the
+    same way (test_compare_slot.py::test_close_detaches_stragglers...)."""
+    import rai_ui.main_window as mw
+
+    window.show()
+    wav = _write_drill(tmp_path, 140.0)
+    _analyze(window, qtbot, wav)
+    assert window._threads, "analysis should have left a worker lane"
+    thread, worker = window._threads[0]
+    thread.wait = lambda *_a, **_k: False  # simulate a compute-bound straggler
+
+    window.close()
+
+    assert thread.parent() is None  # out of the destruction chain
+    assert (thread, worker) in mw._ORPHANED_THREADS
+    assert (thread, worker) not in window._threads
+
+    # Hygiene: let the real thread finish so it doesn't leak into other tests.
+    del thread.wait
+    thread.quit()
+    assert thread.wait(30_000)
+    mw._ORPHANED_THREADS.remove((thread, worker))

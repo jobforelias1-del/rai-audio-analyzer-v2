@@ -186,6 +186,13 @@ def hear_toast(bpm: float) -> str:
 # QSettings key for the rail⇄bridge choice (ruling R10).
 _RAIL_COLLAPSED_KEY = "ui/rail_collapsed"
 
+# A-lane stragglers that outlive closeEvent's bounded wait are detached from
+# the window's destruction chain and parked here until process exit —
+# destroying a running QThread is a Qt qFatal hard abort, and letting GC do
+# it is heap corruption (the compare_slot/relearn recipe, retrofitted here
+# 2026-07-12 after the CI ui-offscreen SIGSEGV).
+_ORPHANED_THREADS: list[tuple[QThread, AnalysisWorker]] = []
+
 
 def _ui_settings() -> QSettings:
     """QSettings for shell UI preferences (rail⇄bridge mode).
@@ -528,9 +535,21 @@ class MainWindow(QMainWindow):
         # leaked deliberately rather than qFatal-ing (landmine 1 / review 11).
         self.relearn.close()
         self.compare_slot.close()  # M4: the B lane's own bounded teardown
-        for thread, _worker in self._threads:
+        # A-lane bounded teardown, SAME recipe as compare_slot/relearn: a
+        # compute-bound analysis worker that outlives the wait (quit() cannot
+        # interrupt resolve_tempo mid-flight) is detached and parked —
+        # dropping the wrappers instead lets a later GC pass destroy a
+        # RUNNING QThread (Qt hard abort / heap corruption; this was the
+        # 2026-07-12 CI ui-offscreen SIGSEGV, reproducing on slow runners
+        # where fingerprint scoring exceeds the 2 s grace).
+        for thread, worker in self._threads:
             thread.quit()
-            thread.wait(2000)
+            if not thread.wait(2000):
+                thread.setParent(None)  # out of the destruction chain
+                _ORPHANED_THREADS.append((thread, worker))
+        self._threads = [
+            pair for pair in self._threads if pair not in _ORPHANED_THREADS
+        ]
         super().closeEvent(event)
 
     def resizeEvent(self, event) -> None:
