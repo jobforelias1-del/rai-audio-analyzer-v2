@@ -11,13 +11,14 @@ for behavioural changes; unit tests guard the mechanisms.
 - **Profile popover expansion** (M5 acceptance finding #2, thinness half —
   expand direction chosen over collapse-to-button; existing structures
   only): a profile identity row under the title (the header chip's own
-  `DRILL · 140–170`, imported so chip and popover can never drift —
-  anticipating design C-11's "drill-first, grows into a selector"), hairline
-  separators framing the state block, and an honest gate hint ("relearn
-  unlocks at 3 confirmed truths") visible only while the relearn button is
-  below its ≥3 gate. No `set_state` signature change, no new store
-  surfaces; the relearn skip-report row stays deferred (needs a persisted
-  last-report surface — a product decision).
+  `DRILL · 140–170`, imported so chip and popover can never drift, rendered
+  in design C-11's active-entry idiom — amber marker dot + mono 12/600,
+  mirroring the chip's own treatment), hairline separators framing the
+  state block, and an honest gate hint ("relearn unlocks at 3 confirmed
+  truths") visible only while the relearn button is below its ≥3 gate. No
+  `set_state` signature change, no new store surfaces; the relearn
+  skip-report row stays deferred (needs a persisted last-report surface —
+  a product decision).
 
 ### Fixed
 
@@ -29,9 +30,12 @@ for behavioural changes; unit tests guard the mechanisms.
   metric cells. New placement (`anchor_position`, pure + unit-tested): keeps
   the designed chip right-alignment but drops below the header's bottom
   edge, clamps left of the rail in rail mode, clears the 76px strip in
-  bridge mode, and never escapes the window's left content edge. Preview
-  harness gains the append-only `14-profile-popover` composite shot (a
-  Qt.Popup is invisible to `window.grab()`).
+  bridge mode, and never escapes the window's left content edge or the
+  screen's bottom edge (a plain Qt.Popup gets no screen-fitting from Qt —
+  post-ship review finding: a low-dragged window left the popover's lower
+  rows unreachable). Preview harness gains the append-only
+  `14-profile-popover` composite shot (a Qt.Popup is invisible to
+  `window.grab()`).
 
 - **Confirmed card copy de-dupe** (M5 acceptance finding #1): the rail's
   confirmed verdict card said "saved as ground truth" twice — on the computed

@@ -854,6 +854,16 @@ class MainWindow(QMainWindow):
                     else None
                 ),
                 min_x=self.mapToGlobal(QPoint(0, 0)).x() + POPOVER_GAP,
+                # Screen-bottom clamp (review finding 07-12): a Qt.Popup gets
+                # no automatic screen-fitting — without this, a low-dragged
+                # window leaves the popover's lower rows unreachable.
+                screen_bottom_y=(
+                    self.screen().availableGeometry().y()
+                    + self.screen().availableGeometry().height()
+                    if self.screen() is not None
+                    else None
+                ),
+                popover_height=self.profile_popover.sizeHint().height(),
             )
         )
 

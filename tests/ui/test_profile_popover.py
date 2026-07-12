@@ -95,10 +95,17 @@ def test_confirmed_count_line_pluralizes():
 
 def test_profile_row_is_the_header_chips_own_text(popover):
     # The identity row IS the chip's constant (imported, not retyped) — the
-    # popover can never claim a different profile than the chip it pops from.
+    # popover can never claim a different profile than the chip it pops from
+    # — rendered in C-11's active-entry idiom: the amber marker dot + the
+    # entry name (the dot identifies the profile; 05:232 makes it
+    # load-bearing — "ties the chip to the band shading on the tempogram").
+    from rai_ui.theme._tokens_gen import COLOR_SEMANTIC_MARKER_PRIMARY_BASE
     from rai_ui.widgets.header import GENRE_CHIP_TEXT
 
-    assert popover._profile_row.text() == GENRE_CHIP_TEXT
+    row_markup = popover._profile_row.text()
+    assert GENRE_CHIP_TEXT in row_markup
+    assert "●" in row_markup
+    assert COLOR_SEMANTIC_MARKER_PRIMARY_BASE in row_markup  # amber dot
 
 
 def test_gate_hint_states_the_gate():
@@ -255,7 +262,7 @@ def test_every_designed_label_is_type_pinned(popover):
     # restates family/size/weight at widget-stylesheet level.
     for label, px in (
         (popover._title, 11),
-        (popover._profile_row, 13),
+        (popover._profile_row, 12),
         (popover._source_label, 12),
         (popover._count_label, 12),
         (popover._gate_hint, 11),
@@ -377,3 +384,30 @@ class TestAnchorPosition:
             min_x=8,
         )
         assert pos.x() == 8  # degrade inside the window, never escape it
+
+    def test_low_window_clamps_to_screen_bottom(self):
+        # Review finding (07-12): a plain Qt.Popup gets no screen-fitting
+        # from Qt — a window dragged low left the relearn button / revert /
+        # footer below the screen edge and unreachable.
+        pos = anchor_position(
+            chip_right_x=978,
+            header_bottom_y=780,   # window dragged near the screen bottom
+            popover_width=300,
+            rail_left_x=866,
+            bridge_bottom_y=None,
+            min_x=8,
+            screen_bottom_y=900,
+            popover_height=220,
+        )
+        assert pos.y() + 220 + POPOVER_DROP == 900  # bottom stays on-screen
+        pos_roomy = anchor_position(
+            chip_right_x=978,
+            header_bottom_y=51,
+            popover_width=300,
+            rail_left_x=866,
+            bridge_bottom_y=None,
+            min_x=8,
+            screen_bottom_y=900,
+            popover_height=220,
+        )
+        assert pos_roomy.y() == 51 + POPOVER_DROP  # roomy screen: no effect

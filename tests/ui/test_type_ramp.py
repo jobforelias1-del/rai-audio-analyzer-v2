@@ -394,10 +394,10 @@ class TestM3PopoverRampUnderRealTheme:
     # Post-ship expansion rows (M5 finding #2, 2026-07-12) — same real-QSS
     # gate for the two new designed labels.
 
-    def test_profile_row_is_mono_13(self, themed_app, qtbot):
+    def test_profile_row_is_mono_12_600(self, themed_app, qtbot):
         popover = self._popover()
         font = _polished_font(themed_app, qtbot, popover, popover._profile_row)
-        _assert_type(font, MONO, 13, 400)  # identity row: the chip's own text
+        _assert_type(font, MONO, 12, 600)  # C-11 active-entry idiom
 
     def test_gate_hint_is_sans_11(self, themed_app, qtbot):
         popover = self._popover()

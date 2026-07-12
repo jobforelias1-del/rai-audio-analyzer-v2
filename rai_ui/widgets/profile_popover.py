@@ -58,6 +58,7 @@ from rai_ui.theme._tokens_gen import (
     COLOR_ACCENT_HOVER,
     COLOR_ACCENT_ON,
     COLOR_BORDER_HAIRLINE,
+    COLOR_SEMANTIC_MARKER_PRIMARY_BASE,
     COLOR_SURFACE_PANEL,
     COLOR_SURFACE_RAISED,
     COLOR_TEXT_DISABLED,
@@ -108,6 +109,8 @@ def anchor_position(
     rail_left_x: Optional[int],
     bridge_bottom_y: Optional[int],
     min_x: int,
+    screen_bottom_y: Optional[int] = None,
+    popover_height: int = 0,
 ) -> QPoint:
     """Global top-left for the popover — chip-aligned but occlusion-free.
 
@@ -127,7 +130,15 @@ def anchor_position(
       as a popup over the plot, never as a broken half-covered card;
     * x never goes past ``min_x`` (the window's left content edge), so a
       narrow window degrades by overlapping plot, not by escaping the
-      window.
+      window;
+    * with ``screen_bottom_y`` + ``popover_height`` supplied, y is clamped
+      so the popover's bottom stays on the screen — a plain ``Qt.Popup``
+      gets NO automatic screen-fitting from Qt (only QMenu computes its
+      own), so a window dragged low would otherwise leave the relearn
+      button / revert link / footer rendered below the screen edge and
+      unreachable (post-ship review finding, 2026-07-12). The upward clamp
+      may cover header chrome on a very low window — a popup over chrome
+      beats controls that cannot be clicked.
 
     Pure math — the shell feeds global coordinates; the widget stays a dumb
     ``open_at`` target.
@@ -138,6 +149,8 @@ def anchor_position(
     y = header_bottom_y + POPOVER_DROP
     if bridge_bottom_y is not None:
         y = bridge_bottom_y + POPOVER_DROP
+    if screen_bottom_y is not None:
+        y = min(y, screen_bottom_y - popover_height - POPOVER_DROP)
     return QPoint(max(x, min_x), y)
 
 
@@ -212,12 +225,21 @@ class ProfilePopover(QFrame):
         layout.addWidget(self._title)
 
         # Profile identity row — the header chip's own text (imported, so
-        # chip and popover can never drift): the active profile entry of
-        # C-11's future selector, rendered as information (mono 13 primary),
-        # deliberately NOT as a raised row that could read as a dead click.
-        self._profile_row = QLabel(GENRE_CHIP_TEXT, self)
-        profile_font = mono_font(13)
+        # chip and popover can never drift), rendered in C-11's active-entry
+        # idiom: the 7px amber marker dot ("ties the chip to the band shading
+        # on the tempogram", 05:232 — the dot identifies the profile, it
+        # judges nothing) + mono 12/600, mirroring the chip's own RichText
+        # treatment. Entry chrome only — deliberately NOT a raised/selected
+        # row, which could read as a dead click while there is one profile.
+        self._profile_row = QLabel(self)
+        profile_font = mono_font(12, QFont.Weight.DemiBold)
         self._profile_row.setFont(profile_font)
+        self._profile_row.setTextFormat(Qt.TextFormat.RichText)
+        self._profile_row.setText(
+            # token: color.semantic.marker-primary.base (dot)
+            f'<span style="color: {COLOR_SEMANTIC_MARKER_PRIMARY_BASE};">●</span>'
+            f"&nbsp;{GENRE_CHIP_TEXT}"
+        )
         self._profile_row.setStyleSheet(
             f"color: {COLOR_TEXT_PRIMARY}; background: transparent; border: none;"  # token: color.text.primary
             + type_pin(profile_font)
