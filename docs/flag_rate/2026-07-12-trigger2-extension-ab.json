@@ -1,0 +1,173 @@
+{
+  "mode": "trigger2-extension",
+  "rows": [
+    {
+      "name": "freeze_corleone_cartier.wav",
+      "path": "/Users/eliasyoung/Projects/rai-audio-analyzer-v2/validation/fixtures/freeze_corleone_cartier.wav",
+      "stock_ambiguous": true,
+      "stock_bpm": 138.32959586893617,
+      "extended_ambiguous": true,
+      "extended_bpm": 138.32959586893617,
+      "extended_reason": "primary 138 is outside the drill band [140-170], yet 170 (salience 0.29) sits inside it",
+      "flipped": false
+    },
+    {
+      "name": "freeze_rael.wav",
+      "path": "/Users/eliasyoung/Projects/rai-audio-analyzer-v2/validation/fixtures/freeze_rael.wav",
+      "stock_ambiguous": true,
+      "stock_bpm": 136.80705077898426,
+      "extended_ambiguous": true,
+      "extended_bpm": 136.80705077898426,
+      "extended_reason": "68 (octave_down) scores within 83% of 137; primary 137 is outside the drill band [140-170], yet 170 (salience 0.51) sits inside it",
+      "flipped": false
+    },
+    {
+      "name": "ledger_en_acier.wav",
+      "path": "/Users/eliasyoung/Projects/rai-audio-analyzer-v2/validation/fixtures/ledger_en_acier.wav",
+      "stock_ambiguous": false,
+      "stock_bpm": 166.1042108668408,
+      "extended_ambiguous": true,
+      "extended_bpm": 166.1042108668408,
+      "extended_reason": "180 (unrelated) scores within 82% of 166",
+      "flipped": true
+    },
+    {
+      "name": "mathematics_of_the_menace.wav",
+      "path": "/Users/eliasyoung/Projects/rai-audio-analyzer-v2/validation/fixtures/mathematics_of_the_menace.wav",
+      "stock_ambiguous": true,
+      "stock_bpm": 192.66248172479746,
+      "extended_ambiguous": true,
+      "extended_bpm": 192.66248172479746,
+      "extended_reason": "128 (dotted_down) scores within 85% of 193; primary 193 is outside the drill band [140-170], yet 146 (salience 0.13) sits inside it",
+      "flipped": false
+    },
+    {
+      "name": "taco_puttin_on_the_ritz.wav",
+      "path": "/Users/eliasyoung/Projects/rai-audio-analyzer-v2/validation/fixtures/taco_puttin_on_the_ritz.wav",
+      "stock_ambiguous": true,
+      "stock_bpm": 204.55301649893295,
+      "extended_ambiguous": true,
+      "extended_bpm": 204.55301649893295,
+      "extended_reason": "148 (fractional) scores within 87% of 205; primary 205 is outside the drill band [140-170], yet 166 (salience 0.35) sits inside it",
+      "flipped": false
+    },
+    {
+      "name": "ziak_fixette.wav",
+      "path": "/Users/eliasyoung/Projects/rai-audio-analyzer-v2/validation/fixtures/ziak_fixette.wav",
+      "stock_ambiguous": false,
+      "stock_bpm": 146.57119965816946,
+      "extended_ambiguous": true,
+      "extended_bpm": 146.57119965816946,
+      "extended_reason": "135 (unrelated) scores within 82% of 147",
+      "flipped": true
+    },
+    {
+      "name": "0 Lead Vocal.wav",
+      "path": "/Users/eliasyoung/Desktop/july 9th overflow/test tracks from july 7 /0 Lead Vocal.wav",
+      "stock_ambiguous": false,
+      "stock_bpm": 144.32171499224677,
+      "extended_ambiguous": true,
+      "extended_bpm": 144.32171499224677,
+      "extended_reason": "162 (unrelated) scores within 87% of 144",
+      "flipped": true
+    },
+    {
+      "name": "BTSFX.wav",
+      "path": "/Users/eliasyoung/Desktop/july 9th overflow/test tracks from july 7 /BTSFX.wav",
+      "stock_ambiguous": false,
+      "stock_bpm": 140.15847825400104,
+      "extended_ambiguous": true,
+      "extended_bpm": 140.15847825400104,
+      "extended_reason": "128 (unrelated) scores within 98% of 140",
+      "flipped": true
+    },
+    {
+      "name": "Excision & Level Up - Club XL \uff5c Subsidia [Kfb4HhDv1uw].wav",
+      "path": "/Users/eliasyoung/Desktop/july 9th overflow/test tracks from july 7 /Excision & Level Up - Club XL \uff5c Subsidia [Kfb4HhDv1uw].wav",
+      "stock_ambiguous": false,
+      "stock_bpm": 144.6074615133367,
+      "extended_ambiguous": false,
+      "extended_bpm": 144.6074615133367,
+      "extended_reason": null,
+      "flipped": false
+    },
+    {
+      "name": "Freeze Corleone 667 feat. Ashe22 - Scell\u00e9 part.4 [J-RCWiX2fm8].wav",
+      "path": "/Users/eliasyoung/Desktop/july 9th overflow/test tracks from july 7 /Freeze Corleone 667 feat. Ashe22 - Scell\u00e9 part.4 [J-RCWiX2fm8].wav",
+      "stock_ambiguous": true,
+      "stock_bpm": 166.70866935483872,
+      "extended_ambiguous": true,
+      "extended_bpm": 166.70866935483872,
+      "extended_reason": "raw tempogram peaks at 222, prior favors 148 (dotted_down); 222 (fractional) scores within 92% of 167",
+      "flipped": false
+    },
+    {
+      "name": "GAZO x Freeze Corleone 667 - DRILL FR 4 [lbeUyW6axeA].wav",
+      "path": "/Users/eliasyoung/Desktop/july 9th overflow/test tracks from july 7 /GAZO x Freeze Corleone 667 - DRILL FR 4 [lbeUyW6axeA].wav",
+      "stock_ambiguous": true,
+      "stock_bpm": 135.84837600628333,
+      "extended_ambiguous": true,
+      "extended_bpm": 135.84837600628333,
+      "extended_reason": "208 (dotted_up) scores within 85% of 136; primary 136 is outside the drill band [140-170], yet 170 (salience 0.47) sits inside it",
+      "flipped": false
+    },
+    {
+      "name": "MW2 [Sepi1NFW6_0].wav",
+      "path": "/Users/eliasyoung/Desktop/july 9th overflow/test tracks from july 7 /MW2 [Sepi1NFW6_0].wav",
+      "stock_ambiguous": true,
+      "stock_bpm": 119.58555839646759,
+      "extended_ambiguous": true,
+      "extended_bpm": 119.58555839646759,
+      "extended_reason": "raw tempogram peaks at 240, prior favors 123 (octave_down); 139 (fractional) scores within 86% of 120; primary 120 is outside the drill band [140-170], yet 162 (salience 0.40) sits inside it",
+      "flipped": false
+    },
+    {
+      "name": "Poundz - Fake Love [Music Video] \uff5c GRM Daily [5ODBlf36p7M].wav",
+      "path": "/Users/eliasyoung/Desktop/july 9th overflow/test tracks from july 7 /Poundz - Fake Love [Music Video] \uff5c GRM Daily [5ODBlf36p7M].wav",
+      "stock_ambiguous": true,
+      "stock_bpm": 140.10285928288081,
+      "extended_ambiguous": true,
+      "extended_bpm": 140.10285928288081,
+      "extended_reason": "raw tempogram peaks at 208, prior favors 141 (dotted_down); 156 (unrelated) scores within 84% of 140",
+      "flipped": false
+    },
+    {
+      "name": "Voldemort [mLH6chE9miQ].wav",
+      "path": "/Users/eliasyoung/Desktop/july 9th overflow/test tracks from july 7 /Voldemort [mLH6chE9miQ].wav",
+      "stock_ambiguous": true,
+      "stock_bpm": 127.96313467297678,
+      "extended_ambiguous": true,
+      "extended_bpm": 127.96313467297678,
+      "extended_reason": "118 (unrelated) scores within 80% of 128; primary 128 is outside the drill band [140-170], yet 141 (salience 0.33) sits inside it",
+      "flipped": false
+    },
+    {
+      "name": "Ziak - C'est la vie (Prod. Devil) [9OoDlRJOpW8].wav",
+      "path": "/Users/eliasyoung/Desktop/july 9th overflow/test tracks from july 7 /Ziak - C'est la vie (Prod. Devil) [9OoDlRJOpW8].wav",
+      "stock_ambiguous": true,
+      "stock_bpm": 143.7598081937485,
+      "extended_ambiguous": true,
+      "extended_bpm": 143.7598081937485,
+      "extended_reason": "148 (self) scores within 98% of 144",
+      "flipped": false
+    },
+    {
+      "name": "gwmstem.wav",
+      "path": "/Users/eliasyoung/Desktop/july 9th overflow/test tracks from july 7 /gwmstem.wav",
+      "stock_ambiguous": true,
+      "stock_bpm": 205.1453642063138,
+      "extended_ambiguous": true,
+      "extended_bpm": 205.1453642063138,
+      "extended_reason": "182 (unrelated) scores within 85% of 205; primary 205 is outside the drill band [140-170], yet 155 (salience 0.19) sits inside it",
+      "flipped": false
+    }
+  ],
+  "summary": {
+    "files": 16,
+    "analyzed": 16,
+    "errors": 0,
+    "stock_flagged": 11,
+    "extended_flagged": 15,
+    "flips": 4
+  }
+}

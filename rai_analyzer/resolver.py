@@ -247,7 +247,13 @@ def _detect_ambiguity(
         if (
             top.score > 0
             and runner.score / top.score >= amb.score_close_frac
-            and runner.relationship in _AMBIGUOUS_RELATIONS
+            # count_unrelated_runner (default False) extends the relation set
+            # to UNRELATED — any strong runner flags (the measurement history
+            # behind the knob lives on AmbiguityParams in config.py).
+            and (
+                amb.count_unrelated_runner
+                or runner.relationship in _AMBIGUOUS_RELATIONS
+            )
         ):
             pct = 100.0 * runner.score / top.score
             reasons.append(

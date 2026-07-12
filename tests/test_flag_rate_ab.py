@@ -241,3 +241,88 @@ def test_main_json_mode_and_exit_codes(corpus, learned_profile, capsys, tmp_path
     empty.mkdir()
     assert ab.main([str(empty), "--profile-json", learned_profile]) == 2
     assert ab.main([paths[0], "--profile-json", "/nope.json"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# --trigger2-ab mode (2026-07-12): stock config vs the UNRELATED-runner knob
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def trigger2_report(corpus):
+    _, paths = corpus
+    return ab.run_trigger2_ab(paths)
+
+
+def test_trigger2_report_shape_and_flip_consistency(trigger2_report, corpus):
+    _, paths = corpus
+    assert trigger2_report["mode"] == "trigger2-extension"
+    s = trigger2_report["summary"]
+    assert s["files"] == len(paths)
+    assert s["errors"] == 0 and s["analyzed"] == len(paths)
+    for row in trigger2_report["rows"]:
+        assert row["flipped"] == (row["stock_ambiguous"] != row["extended_ambiguous"])
+        # The knob widens the relation set only: extended can never UNFLAG.
+        assert not (row["stock_ambiguous"] and not row["extended_ambiguous"])
+
+
+def test_trigger2_stock_lane_matches_a_direct_default_analysis(
+    trigger2_report, corpus
+):
+    from rai_analyzer.analyzer import analyze_file
+
+    _, paths = corpus
+    direct = analyze_file(paths[0], with_loudness=False)
+    row = next(
+        r for r in trigger2_report["rows"] if r["path"] == os.path.abspath(paths[0])
+    )
+    assert row["stock_ambiguous"] == bool(direct.tempo.ambiguous)
+    assert row["stock_bpm"] == pytest.approx(float(direct.tempo.primary_bpm))
+
+
+def test_trigger2_extended_lane_actually_sets_the_knob(monkeypatch, tmp_path):
+    # Contract pin: lane A runs a stock config, lane B runs
+    # count_unrelated_runner=True — proven by capturing the cfgs the tool
+    # hands to analyze_file, not by trusting the docstring.
+    from rai_analyzer.synthetic import click_track as ct, write_wav as ww
+
+    wav = ww(str(tmp_path / "probe.wav"), ct(150.0, duration=6.0))
+    seen_cfgs = []
+
+    import rai_analyzer.analyzer as analyzer_module
+
+    real_analyze = analyzer_module.analyze_file
+
+    def spy(path, cfg=None, with_loudness=True, **kw):
+        seen_cfgs.append(cfg)
+        return real_analyze(path, cfg=cfg, with_loudness=with_loudness, **kw)
+
+    monkeypatch.setattr(analyzer_module, "analyze_file", spy)
+    ab.run_trigger2_ab([wav])
+    assert len(seen_cfgs) == 2
+    assert seen_cfgs[0].ambiguity.count_unrelated_runner is False
+    assert seen_cfgs[1].ambiguity.count_unrelated_runner is True
+
+
+def test_trigger2_markdown_render(trigger2_report):
+    text = ab.render_trigger2_markdown(trigger2_report)
+    assert "stock trigger 2 vs UNRELATED-runner extension" in text
+    assert "| File | Stock | +UNRELATED runner | Flipped |" in text
+    assert "**Flag rate:** stock" in text
+
+
+def test_trigger2_cli_rejects_profile_json(corpus, capsys, tmp_path):
+    d, _ = corpus
+    fake_profile = tmp_path / "p.json"
+    fake_profile.write_text("{}")
+    code = ab.main([d, "--trigger2-ab", "--profile-json", str(fake_profile)])
+    assert code == 2
+    assert "does not apply" in capsys.readouterr().err
+
+
+def test_trigger2_cli_json_mode(corpus, capsys):
+    d, _ = corpus
+    code = ab.main([d, "--trigger2-ab", "--json"])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "trigger2-extension"

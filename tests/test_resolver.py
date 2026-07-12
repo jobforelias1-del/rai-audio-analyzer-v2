@@ -210,3 +210,43 @@ def test_confident_in_band_primary_is_not_flagged():
     )
     assert ambiguous is False
     assert reason is None
+
+
+def test_unrelated_runner_not_flagged_by_default():
+    # The REAL Fixette shape (measured 2026-07-06): runner 134.69 vs primary
+    # 146.57 sits ~8% off unity, outside the 4% ratio tolerance for every
+    # tabled relationship, so it classifies UNRELATED — and the shipped
+    # trigger 2 deliberately does not fire. This pins the v3.0.0 default
+    # (count_unrelated_runner=False) so graduating the knob is always a
+    # visible, deliberate change.
+    candidates = _ranked(146.57, 2.360, 134.69, 2.360 * 0.86)
+    assert candidates[1].relationship is Relationship.UNRELATED
+    ambiguous, reason = _detect_ambiguity(
+        candidates, DEFAULT_CONFIG, raw_best=146.57, priored_best=146.57
+    )
+    assert ambiguous is False
+    assert reason is None
+
+
+def test_unrelated_runner_flags_with_extension_knob():
+    # Same real-Fixette candidates, knob on: any strong runner counts, so the
+    # UNRELATED near-miss flags with an honest reason naming both tempos.
+    from rai_analyzer.config import AmbiguityParams, TempoConfig
+
+    cfg = TempoConfig(ambiguity=AmbiguityParams(count_unrelated_runner=True))
+    candidates = _ranked(146.57, 2.360, 134.69, 2.360 * 0.86)
+    assert candidates[1].relationship is Relationship.UNRELATED
+    ambiguous, reason = _detect_ambiguity(
+        candidates, cfg, raw_best=146.57, priored_best=146.57
+    )
+    assert ambiguous is True
+    assert reason
+    assert "135" in reason and "147" in reason  # rounded BPMs, both named
+    # The wide-gap regression guard holds under the knob too — the extension
+    # widens the relation set, never the score threshold.
+    calm = _ranked(150.0, 2.400, 145.0, 2.400 * 0.72)
+    ambiguous_calm, reason_calm = _detect_ambiguity(
+        calm, cfg, raw_best=150.0, priored_best=150.0
+    )
+    assert ambiguous_calm is False
+    assert reason_calm is None

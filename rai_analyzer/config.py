@@ -149,6 +149,15 @@ class AmbiguityParams:
     # gate misses) but changes flag rates on confident material — deferred to
     # dedicated engine work with corpus-wide flag-rate analysis.
     score_close_frac: float = 0.80
+    # The deferred extension above, graduated to a measurable knob
+    # (2026-07-12): when True, trigger 2 also counts an UNRELATED runner-up —
+    # any strong runner (>= score_close_frac) flags, regardless of ratio
+    # relationship. Byte-for-byte the 2026-07-06 experiment: flags the real
+    # Fixette and the variant-bounce gate misses, adds flags on some
+    # otherwise-confident material. Default False = shipped v3.0.0 behaviour
+    # (gate byte-identical); flipping the default is an operator decision
+    # made against corpus A/B data (tools/flag_rate_ab.py --trigger2-ab).
+    count_unrelated_runner: bool = False
     # Trigger 3 (the confidently-wrong catch): the primary lands OUTSIDE the
     # genre's canonical notated band while real rhythmic evidence sits inside it.
     # This is the failure Triggers 1 & 2 both miss — a single dominant peak in a

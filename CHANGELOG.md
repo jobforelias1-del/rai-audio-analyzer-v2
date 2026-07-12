@@ -8,6 +8,22 @@ for behavioural changes; unit tests guard the mechanisms.
 
 ### Added
 
+- **Trigger-2 UNRELATED-runner knob** (`AmbiguityParams.
+  count_unrelated_runner`, default `False`): the Phase-0-deferred extension,
+  graduated from a never-committed working-tree experiment to a measurable
+  config knob. Off by default — the acceptance gate is byte-identical with
+  the knob off (verified), so shipped behaviour is unchanged. New
+  `tools/flag_rate_ab.py --trigger2-ab` mode A/Bs stock-vs-extension on any
+  corpus (both lanes packaged fingerprint). Measured on the exact 16-track
+  M5 corpus (recovered by log forensics after the 07-09 Desktop sweep;
+  integrity proven by digit-for-digit reproduction of the M5
+  packaged-vs-profile table): **stock 11/16 (68.8 %) → extended 15/16
+  (93.8 %), 4 flips, all toward flagging** — the extension catches
+  ziak_fixette (its design target) but also flips ledger_en_acier (the
+  reference confident fixture), 0 Lead Vocal, and BTSFX. Results committed
+  under `docs/flag_rate/`. Graduation (default `True` + gate re-baseline)
+  is an open operator decision; the shipped default stays `False`.
+
 - **Profile popover expansion** (M5 acceptance finding #2, thinness half —
   expand direction chosen over collapse-to-button; existing structures
   only): a profile identity row under the title (the header chip's own

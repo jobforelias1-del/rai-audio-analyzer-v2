@@ -163,6 +163,67 @@ def run_ab(paths: list[str], profile_json: str) -> dict:
     }
 
 
+def run_trigger2_ab(paths: list[str]) -> dict:
+    """Analyze every path twice — stock config vs the trigger-2 UNRELATED
+    extension (``AmbiguityParams.count_unrelated_runner=True``) — and report.
+
+    Both lanes run the PACKAGED fingerprint (no profile injection): this A/B
+    isolates the engine knob. Schema mirrors ``run_ab`` with
+    ``stock_*``/``extended_*`` keys, plus the extended lane's ambiguity
+    reason so every flip is explainable in the table.
+    """
+    from rai_analyzer.analyzer import analyze_file
+    from rai_analyzer.config import AmbiguityParams, TempoConfig
+    from rai_analyzer.evidence.fingerprint import clear_fingerprint_cache
+
+    rows: list[dict] = []
+    clear_fingerprint_cache()
+    try:
+        for path in paths:
+            row: dict = {"name": os.path.basename(path), "path": os.path.abspath(path)}
+            try:
+                stock = analyze_file(path, cfg=TempoConfig(), with_loudness=False)
+                extended = analyze_file(
+                    path,
+                    cfg=TempoConfig(
+                        ambiguity=AmbiguityParams(count_unrelated_runner=True)
+                    ),
+                    with_loudness=False,
+                )
+            except Exception as exc:  # per-file casualty: report, move on
+                row["error"] = f"{type(exc).__name__}: {exc}"
+            else:
+                row.update(
+                    stock_ambiguous=bool(stock.tempo.ambiguous),
+                    stock_bpm=float(stock.tempo.primary_bpm),
+                    extended_ambiguous=bool(extended.tempo.ambiguous),
+                    extended_bpm=float(extended.tempo.primary_bpm),
+                    extended_reason=extended.tempo.ambiguity_reason,
+                    flipped=bool(stock.tempo.ambiguous)
+                    != bool(extended.tempo.ambiguous),
+                )
+            rows.append(row)
+    finally:
+        clear_fingerprint_cache()
+
+    analyzed = [r for r in rows if "error" not in r]
+    stock_flags = sum(1 for r in analyzed if r["stock_ambiguous"])
+    extended_flags = sum(1 for r in analyzed if r["extended_ambiguous"])
+    flips = sum(1 for r in analyzed if r["flipped"])
+    return {
+        "mode": "trigger2-extension",
+        "rows": rows,
+        "summary": {
+            "files": len(rows),
+            "analyzed": len(analyzed),
+            "errors": len(rows) - len(analyzed),
+            "stock_flagged": stock_flags,
+            "extended_flagged": extended_flags,
+            "flips": flips,
+        },
+    }
+
+
 def _rate(count: int, total: int) -> str:
     return f"{count}/{total}" + (f" ({100.0 * count / total:.1f} %)" if total else "")
 
@@ -197,6 +258,43 @@ def render_markdown(report: dict) -> str:
     return "\n".join(lines)
 
 
+def render_trigger2_markdown(report: dict) -> str:
+    lines = [
+        "# Flag-rate A/B — stock trigger 2 vs UNRELATED-runner extension",
+        "",
+        "- both lanes: packaged fingerprint (no profile injection)",
+        "- extension: `AmbiguityParams.count_unrelated_runner=True`",
+        f"- corpus: {report['summary']['files']} file(s)",
+        "",
+        "| File | Stock | +UNRELATED runner | Flipped |",
+        "|---|---|---|---|",
+    ]
+    for row in report["rows"]:
+        if "error" in row:
+            lines.append(f"| {row['name']} | ERROR: {row['error']} | — | — |")
+            continue
+        stock = f"{_verdict(row['stock_ambiguous'])} · {row['stock_bpm']:.2f}"
+        extended = f"{_verdict(row['extended_ambiguous'])} · {row['extended_bpm']:.2f}"
+        flipped = "YES" if row["flipped"] else "no"
+        lines.append(f"| {row['name']} | {stock} | {extended} | {flipped} |")
+    s = report["summary"]
+    lines += [
+        "",
+        "**Flag rate:** stock "
+        f"{_rate(s['stock_flagged'], s['analyzed'])} → extended "
+        f"{_rate(s['extended_flagged'], s['analyzed'])} · {s['flips']} flip(s)"
+        + (f" · {s['errors']} error(s)" if s["errors"] else ""),
+        "",
+    ]
+    flips = [r for r in report["rows"] if r.get("flipped")]
+    if flips:
+        lines += ["**Flip reasons (extended lane):**", ""]
+        for row in flips:
+            lines.append(f"- {row['name']}: {row.get('extended_reason') or '—'}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def main(argv: Optional[list] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="flag_rate_ab",
@@ -217,17 +315,38 @@ def main(argv: Optional[list] = None) -> int:
         "the engine reads it)",
     )
     parser.add_argument(
+        "--trigger2-ab",
+        action="store_true",
+        help="A/B the trigger-2 UNRELATED-runner extension instead of a "
+        "profile: stock config vs count_unrelated_runner=True, both on the "
+        "packaged fingerprint (--profile-json is rejected in this mode)",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="emit the report as JSON instead of markdown",
     )
     args = parser.parse_args(argv)
 
-    profile_json = args.profile_json or default_profile_path()
+    if args.trigger2_ab and args.profile_json:
+        print(
+            "flag_rate_ab: --trigger2-ab measures the engine knob alone; "
+            "--profile-json does not apply",
+            file=sys.stderr,
+        )
+        return 2
+
     paths = collect_wavs(args.corpus)
     if not paths:
         print("flag_rate_ab: no .wav files found in the given corpus", file=sys.stderr)
         return 2
+
+    if args.trigger2_ab:
+        report = run_trigger2_ab(paths)
+        print(json.dumps(report, indent=2) if args.json else render_trigger2_markdown(report))
+        return 0
+
+    profile_json = args.profile_json or default_profile_path()
     try:
         report = run_ab(paths, profile_json)
     except FileNotFoundError as exc:
