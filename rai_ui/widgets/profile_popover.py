@@ -19,6 +19,22 @@ RC-designed, Console-idiomatic popover on the header genre chip:
   *"Profiles are learned locally. Tiebreak choices feed the engine's
   relearning."* — the one piece of designed prose this surface has.
 
+Expanded 2026-07-12 (M5 acceptance finding #2, thinness half — Elias chose
+the expand direction over collapse-to-button; existing structures only):
+
+* a **profile identity row** under the title — the header chip's own
+  ``DRILL · 140–170`` (imported, so chip and popover can never drift) as
+  the active profile entry, anticipating design C-11's "drill-first, grows
+  into a selector" without faking a clickable selector today;
+* **hairline separators** framing the state block — the Console panel's
+  own structure idiom, so the surface reads as sections, not a stub;
+* an **honest gate hint** under the relearn button, visible only below the
+  ≥3 gate — the disabled state now *says* what unlocks it instead of only
+  looking disabled.
+
+The relearn skip-report row stays out: it needs a persisted last-report
+store surface (product decision), and this expansion is existing-data-only.
+
 Chrome is the Console panel idiom: panel surface, hairline border, radius 7,
 with every designed label ``setFont`` + ``type_pin``-pinned (M1 landmine 8).
 
@@ -46,9 +62,11 @@ from rai_ui.theme._tokens_gen import (
     COLOR_SURFACE_RAISED,
     COLOR_TEXT_DISABLED,
     COLOR_TEXT_MUTED,
+    COLOR_TEXT_PRIMARY,
     COLOR_TEXT_SECONDARY,
 )
 from rai_ui.widgets import mono_font, ui_font
+from rai_ui.widgets.header import GENRE_CHIP_TEXT
 from rai_ui.widgets.verdict_block import type_pin
 
 # The relearn gate (R-M3-11 / plan D6): the button goes live at 3 effective
@@ -63,6 +81,10 @@ SOURCE_PACKAGED_TEXT = "packaged fingerprint"
 SOURCE_USER_TEXT = "user profile"
 
 REVERT_LINK_TEXT = "revert to previous"
+
+# The honest-gate hint (M5 finding #2 expansion): shown only below the ≥3
+# gate, so the disabled relearn button states its own unlock condition.
+GATE_HINT_TEXT = f"relearn unlocks at {RELEARN_MIN_CONFIRMS} confirmed truths"
 
 # The design's profile-popover footer, verbatim (04:83, 05:229).
 FOOTER_TEXT = (
@@ -189,6 +211,21 @@ class ProfilePopover(QFrame):
         )
         layout.addWidget(self._title)
 
+        # Profile identity row — the header chip's own text (imported, so
+        # chip and popover can never drift): the active profile entry of
+        # C-11's future selector, rendered as information (mono 13 primary),
+        # deliberately NOT as a raised row that could read as a dead click.
+        self._profile_row = QLabel(GENRE_CHIP_TEXT, self)
+        profile_font = mono_font(13)
+        self._profile_row.setFont(profile_font)
+        self._profile_row.setStyleSheet(
+            f"color: {COLOR_TEXT_PRIMARY}; background: transparent; border: none;"  # token: color.text.primary
+            + type_pin(profile_font)
+        )
+        layout.addWidget(self._profile_row)
+
+        layout.addWidget(self._hairline())
+
         # Source line — a measurement-ish status, so mono 12 secondary (the
         # header file-chip's type treatment).
         self._source_label = QLabel(self)
@@ -236,6 +273,17 @@ class ProfilePopover(QFrame):
         self.relearn_button.clicked.connect(self.relearn_requested.emit)
         layout.addWidget(self.relearn_button)
 
+        # Honest-gate hint — visible only below the ≥3 gate, so the disabled
+        # button states its unlock condition instead of only looking disabled.
+        self._gate_hint = QLabel(GATE_HINT_TEXT, self)
+        hint_font = ui_font(11)
+        self._gate_hint.setFont(hint_font)
+        self._gate_hint.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; background: transparent; border: none;"  # token: color.text.muted
+            + type_pin(hint_font)
+        )
+        layout.addWidget(self._gate_hint)
+
         # Revert link — the verdict block's inline accent-link idiom; visible
         # only while a one-step backup exists.
         self._revert_link = QLabel(self)
@@ -257,6 +305,8 @@ class ProfilePopover(QFrame):
             lambda _href: self.revert_requested.emit()
         )
         layout.addWidget(self._revert_link)
+
+        layout.addWidget(self._hairline())
 
         # Designed footer copy (04:83), 11px muted, wrapped.
         self._footer = QLabel(FOOTER_TEXT, self)
@@ -280,6 +330,15 @@ class ProfilePopover(QFrame):
             confirmed_count=0,
             backup_exists=False,
         )
+
+    def _hairline(self) -> QFrame:
+        """A 1px separator in the Console hairline idiom (sections, not stub)."""
+        line = QFrame(self)
+        line.setFixedHeight(1)
+        line.setStyleSheet(
+            f"background: {COLOR_BORDER_HAIRLINE}; border: none;"  # token: color.border.hairline
+        )
+        return line
 
     # -- API ------------------------------------------------------------------
 
@@ -311,6 +370,7 @@ class ProfilePopover(QFrame):
         self.relearn_button.setCursor(
             Qt.CursorShape.PointingHandCursor if armed else Qt.CursorShape.ArrowCursor
         )
+        self._gate_hint.setVisible(not armed)
         self._revert_link.setVisible(self._backup_exists)
 
     def open_at(self, global_pos: QPoint) -> None:

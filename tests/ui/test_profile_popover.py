@@ -19,6 +19,7 @@ from PySide6.QtCore import Qt
 
 from rai_ui.widgets.profile_popover import (
     FOOTER_TEXT,
+    GATE_HINT_TEXT,
     POPOVER_DROP,
     POPOVER_GAP,
     POPOVER_TITLE,
@@ -85,6 +86,50 @@ def test_confirmed_count_line_pluralizes():
     assert confirmed_count_line(0) == "0 confirmed truths"
     assert confirmed_count_line(1) == "1 confirmed truth"
     assert confirmed_count_line(3) == "3 confirmed truths"
+
+
+# ---------------------------------------------------------------------------
+# Expansion rows (M5 finding #2, thinness half — 2026-07-12)
+# ---------------------------------------------------------------------------
+
+
+def test_profile_row_is_the_header_chips_own_text(popover):
+    # The identity row IS the chip's constant (imported, not retyped) — the
+    # popover can never claim a different profile than the chip it pops from.
+    from rai_ui.widgets.header import GENRE_CHIP_TEXT
+
+    assert popover._profile_row.text() == GENRE_CHIP_TEXT
+
+
+def test_gate_hint_states_the_gate():
+    assert str(RELEARN_MIN_CONFIRMS) in GATE_HINT_TEXT
+    assert GATE_HINT_TEXT == "relearn unlocks at 3 confirmed truths"
+
+
+def test_gate_hint_visible_only_below_the_gate(popover):
+    # The disabled relearn button states its own unlock condition; once the
+    # gate arms, the hint would be noise and disappears.
+    popover.set_state(
+        profile_kind="packaged",
+        relearned_date=None,
+        confirmed_count=0,
+        backup_exists=False,
+    )
+    assert not popover._gate_hint.isHidden()
+    popover.set_state(
+        profile_kind="packaged",
+        relearned_date=None,
+        confirmed_count=RELEARN_MIN_CONFIRMS - 1,
+        backup_exists=False,
+    )
+    assert not popover._gate_hint.isHidden()
+    popover.set_state(
+        profile_kind="user",
+        relearned_date="2026-07-12",
+        confirmed_count=RELEARN_MIN_CONFIRMS,
+        backup_exists=True,
+    )
+    assert popover._gate_hint.isHidden()
 
 
 # ---------------------------------------------------------------------------
@@ -210,8 +255,10 @@ def test_every_designed_label_is_type_pinned(popover):
     # restates family/size/weight at widget-stylesheet level.
     for label, px in (
         (popover._title, 11),
+        (popover._profile_row, 13),
         (popover._source_label, 12),
         (popover._count_label, 12),
+        (popover._gate_hint, 11),
         (popover._revert_link, 12),
         (popover._footer, 11),
     ):

@@ -391,6 +391,27 @@ class TestM3PopoverRampUnderRealTheme:
         font = _polished_font(themed_app, qtbot, popover, popover.relearn_button)
         _assert_type(font, SANS, 13, 600)
 
+    # Post-ship expansion rows (M5 finding #2, 2026-07-12) — same real-QSS
+    # gate for the two new designed labels.
+
+    def test_profile_row_is_mono_13(self, themed_app, qtbot):
+        popover = self._popover()
+        font = _polished_font(themed_app, qtbot, popover, popover._profile_row)
+        _assert_type(font, MONO, 13, 400)  # identity row: the chip's own text
+
+    def test_gate_hint_is_sans_11(self, themed_app, qtbot):
+        popover = self._popover()
+        # The armed fixture hides the hint — pose below the gate so the
+        # polished font is read off a visible label.
+        popover.set_state(
+            profile_kind="packaged",
+            relearned_date=None,
+            confirmed_count=0,
+            backup_exists=False,
+        )
+        font = _polished_font(themed_app, qtbot, popover, popover._gate_hint)
+        _assert_type(font, SANS, 11, 400)
+
 
 # ---------------------------------------------------------------------------
 # M4: Compare + report-banner designed labels (landmine 8 — same real-QSS

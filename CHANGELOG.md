@@ -6,6 +6,19 @@ for behavioural changes; unit tests guard the mechanisms.
 
 ## [Unreleased] — post-ship polish (2026-07-12)
 
+### Added
+
+- **Profile popover expansion** (M5 acceptance finding #2, thinness half —
+  expand direction chosen over collapse-to-button; existing structures
+  only): a profile identity row under the title (the header chip's own
+  `DRILL · 140–170`, imported so chip and popover can never drift —
+  anticipating design C-11's "drill-first, grows into a selector"), hairline
+  separators framing the state block, and an honest gate hint ("relearn
+  unlocks at 3 confirmed truths") visible only while the relearn button is
+  below its ≥3 gate. No `set_state` signature change, no new store
+  surfaces; the relearn skip-report row stays deferred (needs a persisted
+  last-report surface — a product decision).
+
 ### Fixed
 
 - **Profile popover placement** (M5 acceptance finding #2, placement half):
