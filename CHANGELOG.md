@@ -49,7 +49,17 @@ for behavioural changes; unit tests guard the mechanisms.
   had ("the MainWindow closeEvent recipe" that MainWindow itself never got):
   stragglers detach from the destruction chain and park in
   `_ORPHANED_THREADS` until process exit. Pinned mirroring the compare-slot
-  straggler test.
+  straggler test. **Second half (the operative fix — the straggler detach
+  alone measured insufficient, 2 crashes in 4 CI attempts):** the crashing
+  thread is the MAIN thread *garbage-collecting* — the cyclic collector,
+  tripping at an arbitrary allocation inside a later test's `loop.exec()`,
+  tp_dealloc'd PySide6/pyqtgraph wrapper cycles from dozens of
+  already-closed windows (the crashing test moved between runs: it's
+  whoever allocates when the threshold trips). Cure = deterministic
+  teardown: the smoke probe brackets itself with `gc.collect()` at safe
+  points (+ `deleteLater` through Qt's own path), and the ui test tree
+  collects each test's cycles at its own boundary (autouse fixture,
+  ~50 ms/test).
 
 - **Profile popover placement** (M5 acceptance finding #2, placement half):
   the popover anchored to the genre chip with no awareness of what sat

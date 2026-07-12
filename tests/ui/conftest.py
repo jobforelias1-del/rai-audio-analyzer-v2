@@ -64,3 +64,23 @@ def _isolated_ground_truth_store(tmp_path, monkeypatch):
     store_dir = str(tmp_path / "gt-store")
     monkeypatch.setattr(ground_truth_store, "_store_dir", lambda: store_dir)
     return store_dir
+
+
+@pytest.fixture(autouse=True)
+def _deterministic_qt_gc():
+    """Collect each test's Qt wrapper cycles at ITS OWN boundary.
+
+    The cyclic collector fires at arbitrary allocations; in a long ui-suite
+    process that meant PySide6/pyqtgraph wrapper cycles from dozens of
+    already-closed MainWindows were tp_dealloc'd MID-``loop.exec()`` of a
+    later test — C++ deletion at an unsafe moment, and the CI ui-offscreen
+    SIGSEGV of 2026-07-12 ("Current thread ... Garbage-collecting" inside
+    the smoke probe's event loop; the crashing test moved between runs
+    because it is simply whoever allocates when the threshold trips). A
+    test boundary is a safe point: top of stack, no event loop running, no
+    worker mid-signal. Cost is milliseconds per test.
+    """
+    import gc
+
+    yield
+    gc.collect()

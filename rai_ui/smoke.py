@@ -38,6 +38,7 @@ headless Macs have no output device, and that says nothing about the build.
 
 from __future__ import annotations
 
+import gc
 import json
 import os
 import platform
@@ -180,6 +181,15 @@ def _probe_body(report: dict, want_audio: bool) -> int:
     app = create_app()
     report["qt"] = qVersion()
 
+    # Deterministic-GC bracket, opening side (CI SIGSEGV, 2026-07-12): when
+    # the probe runs inside a long-lived test process, cyclic garbage from
+    # dozens of prior windows (PySide6/pyqtgraph wrapper cycles) is waiting
+    # for the collector. If the threshold trips mid-loop.exec() below, the
+    # collector tp_deallocs Qt C++ objects at an arbitrary unsafe moment —
+    # the observed hard crash. Sweep at THIS safe point (top of stack, no
+    # event loop, no workers) so our run doesn't inherit the storm.
+    gc.collect()
+
     window = MainWindow()
     window.show()
     app.processEvents()  # let the first show actually happen
@@ -294,7 +304,15 @@ def _probe_body(report: dict, want_audio: bool) -> int:
             report["audio_ok"] = _play_tone(report)
 
         window.close()
+        # Deterministic-GC bracket, closing side: retire THIS probe's window
+        # through Qt's own deletion path (deleteLater inside event
+        # processing), then collect the survivors here — a safe point — so
+        # the probe's object graph can never become someone else's
+        # mid-loop.exec() GC storm. Parked straggler threads (see
+        # main_window._ORPHANED_THREADS) stay referenced and are untouched.
+        window.deleteLater()
         app.processEvents()
+        gc.collect()
 
         return exit_code_for(report, timed_out)
     finally:
