@@ -4,6 +4,21 @@ All notable changes to RAI Audio Analyzer are recorded here. Dates are in
 ISO-8601. The acceptance gate (`python -m validation`) is the source of truth
 for behavioural changes; unit tests guard the mechanisms.
 
+## [Unreleased] — post-ship polish (2026-07-12)
+
+### Fixed
+
+- **Confirmed card copy de-dupe** (M5 acceptance finding #1): the rail's
+  confirmed verdict card said "saved as ground truth" twice — on the computed
+  reason line and again on the persistent undo line. The undo line is now the
+  bare accent link, matching the meter bridge's existing treatment; the
+  reason line ("you chose X — saved as ground truth", Console CO:773) is the
+  card's single utterance of the phrase. Design-canon note: CO:99's
+  "… · undo" suffix pattern stays correct on the bridge, where the reason and
+  the link share one row; its rail application (a second standalone line
+  repeating the phrase) is retired. UI-only — no engine contact, gate
+  untouched.
+
 ## [3.0.0] — 2026-07-07
 
 The v3 modernization (Phase 3, milestones M0–M5). The tempo engine's

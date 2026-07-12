@@ -165,6 +165,20 @@ class TestVerdictBlock:
         block._undo_line.linkActivated.emit("undo")
         assert seen == [True]
 
+    def test_confirmed_says_saved_as_ground_truth_exactly_once(self, qtbot):
+        # M5 acceptance finding #1: the card used to stack the phrase twice —
+        # the reason line ("you chose X — saved as ground truth") over the
+        # undo line ("saved as ground truth · undo"). The reason line is the
+        # one canonical utterance; the undo line is the bare accent link.
+        block = VerdictBlock()
+        qtbot.addWidget(block)
+        block.set_verdict(confirmed_readout().verdict)
+        card_text = " ".join(
+            [lab.text() for lab in block._reason_labels] + [block._undo_line.text()]
+        )
+        assert card_text.count("saved as ground truth") == 1
+        assert 'href="undo"' in block._undo_line.text()  # link itself survives
+
     def test_error_renders_message_on_neutral_surface(self, qtbot):
         block = VerdictBlock()
         qtbot.addWidget(block)

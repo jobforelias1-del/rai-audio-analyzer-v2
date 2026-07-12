@@ -276,7 +276,10 @@ class VerdictBlock(QFrame):
         self._working_track = SweepTrack(self)
         layout.addWidget(self._working_track)
 
-        # Confirmed card's closing line: "saved as ground truth · undo".
+        # Confirmed card's closing line: the bare "undo" link. The reason line
+        # above it ("you chose X — saved as ground truth", CO:773) is the one
+        # canonical utterance of the phrase on this card; repeating it here was
+        # Elias's acceptance finding #1 (M5_HANDOFF item 1, de-duped 07-12).
         self._undo_line = QLabel(self)
         undo_font = ui_font(12)
         self._undo_line.setFont(undo_font)
@@ -284,9 +287,8 @@ class VerdictBlock(QFrame):
         self._undo_line.setTextFormat(Qt.TextFormat.RichText)
         self._undo_line.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse)
         self._undo_line.setText(
-            # token: color.semantic.confident.text (line) / color.accent.base (link)
-            f'<span style="color:{COLOR_SEMANTIC_CONFIDENT_TEXT}">saved as ground truth · '
-            f'</span><a href="undo" style="color:{COLOR_ACCENT_BASE};'
+            # token: color.accent.base (link)
+            f'<a href="undo" style="color:{COLOR_ACCENT_BASE};'
             f'text-decoration:none">undo</a>'
         )
         self._undo_line.linkActivated.connect(lambda _href: self.undo_requested.emit())
